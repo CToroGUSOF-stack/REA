@@ -221,6 +221,13 @@ export const providerCatalog = (sources) => {
       contracts: declaredContracts("ida", sources.idaProvider.IDA_OPERATIONS),
     },
     {
+      identity: sources.angrProvider.ANGR_PROVIDER_IDENTITY,
+      contracts: declaredContracts(
+        "angr",
+        sources.angrProvider.ANGR_OPERATIONS,
+      ),
+    },
+    {
       identity: sources.kunaProvider.KUNA_PROVIDER_IDENTITY,
       contracts: declaredContracts(
         "kuna",

@@ -79,7 +79,7 @@ is within the authorized scope, use `npx -y rea-agents@latest` in its place.
 Configuration repair starts with a read-only setup plan; show paths, backups and
 skill replacement before applying authorized changes. Preserve existing approval
 and target-execution boundaries. REA setup never installs or upgrades unrelated
-software, including Node.js, npm, Homebrew, Java, Ghidra, IDA, JADX, Kuna, Binwalk or Unblob.
+software, including Node.js, npm, Homebrew, Java, Ghidra, IDA, angr, JADX, Kuna, Binwalk or Unblob.
 
 ## Route the target first
 
@@ -223,6 +223,15 @@ Proceed directly to `analyze_function`, pseudocode, or function/string searches
 after opening; IDA does not supply `binary_overview`. Consult session availability
 when composing broader workflows. Modern direct callers and unsupported dossier
 facets remain unknown; live IDA results are not replayed from snapshots.
+
+For an angr installation, use `open_binary` with `provider_id: "angr"` after
+setting `REA_ANGR_PYTHON` to an interpreter that has `angr[llm]`, or
+`REA_ANGR_MCP_CONFIG` for an explicit stdio command or local HTTP server; see the
+[angr provider guide](https://github.com/morluto/rea/blob/main/docs/angr-provider.md).
+angr recovers a static CFG without shared libraries. Callers and callees come
+from its call graph with partial coverage, `xrefs` lists data references only,
+and functions above angr's complexity limits report missing pseudocode in the
+dossier limitations. angr does not supply `binary_overview`.
 
 With `REA_KUNA_COMMAND` configured, `provider_id: "kuna"` answers procedure
 lists, lookups, pseudocode, assembly and `analyze_function` from Kuna's cached
