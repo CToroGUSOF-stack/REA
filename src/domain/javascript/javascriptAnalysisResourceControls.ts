@@ -12,6 +12,12 @@ export const JAVASCRIPT_ANALYSIS_RESOURCE_DEFAULTS = {
   semanticUnknownsPerFile: 20_000,
 } as const;
 
+/** Bounds of the caller-selected V8 old-space heap for the source analyzer. */
+export const JAVASCRIPT_ANALYSIS_HEAP_MB_BOUNDS = {
+  minimum: 128,
+  maximum: 16_384,
+} as const;
+
 /** Maximum caller-selected retained record capacity; heap and transfer admission still apply. */
 export const JAVASCRIPT_SEMANTIC_ITEM_MAXIMUM = 1_000_000;
 
@@ -83,8 +89,8 @@ export const javaScriptAnalysisResourceControlsSchema = z.strictObject({
   max_heap_mb: z
     .number()
     .int()
-    .min(128)
-    .max(16_384)
+    .min(JAVASCRIPT_ANALYSIS_HEAP_MB_BOUNDS.minimum)
+    .max(JAVASCRIPT_ANALYSIS_HEAP_MB_BOUNDS.maximum)
     .optional()
     .describe(
       "Maximum V8 old-space heap in MiB for the isolated JavaScript source analyzer; defaults to 1024. This does not change the CLI/MCP process heap. When REA runs on Bun, which ignores V8 heap flags, Windows instead limits the analyzer's committed memory to this budget plus a 512 MiB runtime reserve; other Bun hosts enforce no limit.",
