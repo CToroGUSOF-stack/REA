@@ -18,6 +18,14 @@ import {
   stripQueryAndFragment,
 } from "../../domain/artifactPathSyntax.js";
 import {
+  applyUrlReference,
+  urlBaseDirectory,
+  urlDirectoryState,
+  urlPathCandidate as canonicalUrlPathCandidate,
+  urlRelativePath,
+  type UrlPathState,
+} from "../../domain/urlPathSegments.js";
+import {
   classifyPackageImportSpecifier,
   classifyPackageImportTargetString,
   lookupExactPackageImport,
@@ -516,13 +524,11 @@ const contextualCandidate = (
     )
       return bareModuleCandidate(input);
     if (input.moduleKind !== "require") {
-      if (/%(?:2f|5c)/iu.test(stripQueryAndFragment(declared)))
-        return unresolvedCandidate("rejected", [
-          "ES module URL paths cannot contain percent-encoded slash or backslash bytes.",
-        ]);
-      const decoded = decodeModuleUrlPath(stripQueryAndFragment(declared));
-      if (typeof decoded !== "string") return decoded;
-      declared = decoded;
+      const modulePath = normalizeModuleUrlPath(
+        stripQueryAndFragment(declared),
+      );
+      if (typeof modulePath !== "string") return modulePath;
+      declared = modulePath;
     }
   } else if (looksExternal(declared))
     return unresolvedCandidate("external", [
@@ -590,57 +596,49 @@ const decodeModuleUrlPath = (
     : decoded;
 };
 
+/** Normalize URL dot segments before checking bytes in the retained path. */
+const normalizeModuleUrlPath = (
+  declared: string,
+): string | CandidateResolution => {
+  // URL parsing converts JavaScript strings to scalar values before path
+  // decoding. Encoded dots are structural only when the whole segment is a
+  // URL dot segment; encoded separators in discarded segments are harmless.
+  const scalarPath = Buffer.from(declared, "utf8").toString("utf8");
+  const structuralPath = scalarPath
+    .split("/")
+    .map((segment) => {
+      const dots = segment.replace(/%2e/giu, ".");
+      return dots === "." || dots === ".." ? dots : segment;
+    })
+    .join("/");
+  const state = applyUrlReference(urlDirectoryState(""), structuralPath);
+  if (state.segments.some((segment) => /%(?:2f|5c)/iu.test(segment)))
+    return unresolvedCandidate("rejected", [
+      "ES module URL paths cannot contain percent-encoded slash or backslash bytes.",
+    ]);
+  const decodedSegments: string[] = [];
+  for (const segment of state.segments) {
+    const decoded = decodeModuleUrlPath(segment);
+    if (typeof decoded !== "string") return decoded;
+    decodedSegments.push(decoded);
+  }
+  const normalized = [
+    ...Array.from({ length: state.escapes }, () => ".."),
+    ...decodedSegments,
+  ].join("/");
+  return scalarPath.startsWith("/")
+    ? `/${normalized}`
+    : normalized === "" && state.segments.at(-1) === ""
+      ? "./"
+      : normalized.startsWith("/")
+        ? `./${normalized}`
+        : normalized;
+};
+
 const relativeCandidate = (sourcePath: string, declared: string): string =>
   declared.startsWith("/")
     ? declared.slice(1)
     : posix.join(posix.dirname(sourcePath), declared);
-
-/**
- * A URL path during reference resolution. Above-root `..` markers are kept
- * apart from segments, so a later `..` cannot cancel an escape, while empty
- * segments stay removable until the final path is formed.
- */
-interface UrlPathState {
-  readonly escapes: number;
-  readonly segments: readonly string[];
-}
-
-const urlDirectoryState = (directory: string): UrlPathState => ({
-  escapes: 0,
-  segments: directory === "" || directory === "." ? [] : directory.split("/"),
-});
-
-/**
- * Apply URL dot segments: `..` removes the previous segment even when it is
- * empty, so `assets//../app.js` names `assets/app.js`. A final `.` or `..`
- * leaves directory form, as the URL parser does.
- */
-const applyUrlReference = (
-  base: UrlPathState,
-  reference: string,
-): UrlPathState => {
-  const absolute = reference.startsWith("/");
-  const segments = absolute ? [] : [...base.segments];
-  let escapes = absolute ? 0 : base.escapes;
-  const parts = (absolute ? reference.slice(1) : reference).split("/");
-  for (const [index, part] of parts.entries()) {
-    if (part !== "." && part !== "..") {
-      segments.push(part);
-      continue;
-    }
-    if (part === "..")
-      if (segments.length > 0) segments.pop();
-      else escapes += 1;
-    if (index === parts.length - 1) segments.push("");
-  }
-  return { escapes, segments };
-};
-
-/** A relative reference replaces the base URL's final path segment. */
-const urlBaseDirectory = (base: UrlPathState): UrlPathState => ({
-  escapes: base.escapes,
-  segments: base.segments.slice(0, -1),
-});
 
 /**
  * Form the artifact candidate. A remaining empty segment cannot name a
@@ -648,24 +646,23 @@ const urlBaseDirectory = (base: UrlPathState): UrlPathState => ({
  * rejects a candidate that keeps an above-root marker.
  */
 const urlPathCandidate = (path: UrlPathState): string | CandidateResolution => {
-  const segments =
-    path.segments.at(-1) === "" ? path.segments.slice(0, -1) : path.segments;
-  if (segments.includes(""))
-    return unresolvedCandidate("unavailable", [
-      "Repeated URL path separators cannot be mapped to an exact canonical artifact file.",
-    ]);
-  return [
-    ...Array.from({ length: path.escapes }, () => ".."),
-    ...segments,
-  ].join("/");
+  const candidate = canonicalUrlPathCandidate(path);
+  return candidate === null ? unavailableUrlPathCandidate() : candidate;
 };
+
+const unavailableUrlPathCandidate = (): CandidateResolution =>
+  unresolvedCandidate("unavailable", [
+    "Repeated URL path separators cannot be mapped to an exact canonical artifact file.",
+  ]);
 
 /** Resolve a URL path reference against a canonical directory. */
 const urlRelativeCandidate = (
   directory: string,
   reference: string,
-): string | CandidateResolution =>
-  urlPathCandidate(applyUrlReference(urlDirectoryState(directory), reference));
+): string | CandidateResolution => {
+  const candidate = urlRelativePath(directory, reference);
+  return candidate === null ? unavailableUrlPathCandidate() : candidate;
+};
 
 const bareModuleCandidate = (
   input: ResolveArtifactPathInput,
@@ -1801,15 +1798,10 @@ const exactPackageTargetNotFound = (
 const fileUrlPath = (value: string): string | null | undefined => {
   if (!/^file:\/\//iu.test(value)) return undefined;
   // URL parsing removes tabs and newlines and normalizes encoded dot segments.
-  // Check the raw path first, excluding URL identity suffixes, then check the
-  // parsed pathname so parser normalization cannot introduce a separator.
+  // Refuse raw syntax the parser would silently alter, then check the
+  // normalized pathname so discarded segments do not block a valid target.
   const rawPath = stripQueryAndFragment(value);
-  if (
-    value.includes("\0") ||
-    value.includes("\\") ||
-    /[\t\n\r]/u.test(rawPath) ||
-    !admitsCanonicalPathSyntax(rawPath)
-  )
+  if (value.includes("\0") || value.includes("\\") || /[\t\n\r]/u.test(rawPath))
     return null;
   try {
     const url = new URL(value);
