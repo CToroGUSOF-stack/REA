@@ -1,0 +1,56 @@
+import { symlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { createBeamService } from "../../../src/composition/erlang.js";
+import { erlangBeamFixture } from "../../../src/erlang/Beam.fixture.js";
+import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+
+describe("Erlang BEAM stable filesystem boundary", () => {
+  it("reports non-file and malformed BEAM selections as caller input errors", async () => {
+    const root = await createTestTempDirectory("rea-beam-files-");
+    const path = join(root, "app.beam");
+    const alias = join(root, "alias.beam");
+    const malformed = join(root, "malformed.beam");
+    await writeFile(path, erlangBeamFixture());
+    await writeFile(malformed, Buffer.from("not a beam"));
+    await symlink(path, alias);
+    const service = createBeamService();
+    for (const [candidate, reason] of [
+      [root, "invalid_format"],
+      [alias, "invalid_format"],
+      [malformed, "invalid_format"],
+      [join(root, "missing.beam"), "invalid_value"],
+      [join(path, "child.beam"), "invalid_value"],
+    ] as const) {
+      const result = await service.inspect({ path: candidate });
+      if (result.ok) throw new Error("Expected file acquisition failure");
+      expect(result.error).toMatchObject({
+        _tag: "AnalysisInputError",
+        operation: "inspect_erlang_beam",
+        issues: [
+          {
+            path: ["path"],
+            reason,
+            message: expect.any(String),
+          },
+        ],
+      });
+    }
+  });
+
+  it("returns typed resource and cancellation failures", async () => {
+    const root = await createTestTempDirectory("rea-beam-budget-");
+    const path = join(root, "app.beam");
+    await writeFile(path, erlangBeamFixture());
+    const service = createBeamService();
+    const tooSmall = await service.inspect({ path, max_file_bytes: 16 });
+    if (tooSmall.ok) throw new Error("Expected resource budget failure");
+    expect(tooSmall.error._tag).toBe("AnalysisResourceConstraintError");
+    const cancelled = await service.inspect(
+      { path },
+      { signal: AbortSignal.abort() },
+    );
+    if (cancelled.ok) throw new Error("Expected cancellation");
+    expect(cancelled.error._tag).toBe("AnalysisCancelledError");
+  });
+});

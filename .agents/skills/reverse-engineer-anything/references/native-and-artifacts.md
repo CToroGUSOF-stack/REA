@@ -23,6 +23,16 @@ dependencies. An omitted package kind stays null. A rustc commit hash is
 inferred from a read-only `/rustc/<40-hex>/` path and does not by itself
 identify the compiler. See [Rust binaries](https://github.com/morluto/rea/blob/main/docs/rust-binaries.md).
 
+## Erlang BEAM files
+
+Use `inspect_erlang_beam` for an explicit local `FOR1`/`BEAM` file when the
+question concerns IFF chunks, atom names, exports, imports, lambdas, or the
+Code header. No `open_binary`, Erlang installation, or bytecode execution is
+required. The CLI equivalent is `inspect-erlang-beam PATH`. Preserve artifact
+SHA-256, chunk file ranges, 1-based atom indices, and original atom spellings.
+Missing optional tables stay null. See
+[Erlang BEAM files](https://github.com/morluto/rea/blob/main/docs/erlang-beam.md).
+
 ## SQLite snapshots
 
 Use `inspect_sqlite_database` with an explicit local database snapshot for its

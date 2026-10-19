@@ -95,6 +95,16 @@ dependency edges, and the section's file range. A missing `.dep-v0` section is
 null metadata, not proof that the binary has no dependencies. See
 [Rust binaries](rust-binaries.md).
 
+Inspect an Erlang BEAM file without executing bytecode:
+
+```bash
+rea inspect-erlang-beam /absolute/path/to/app.beam --json
+```
+
+The workflow reports IFF chunk names, atom tables, exports, imports, lambdas,
+and the Code chunk header. Missing optional tables stay null. See
+[Erlang BEAM files](erlang-beam.md).
+
 Configure [Hopper or Ghidra](installation.md#hopper), the
 [IDA adapter](ida-provider.md), or [Kuna](kuna-provider.md) before analyzing a
 native target. Substitute

@@ -28,6 +28,9 @@ import { registerGoTools } from "./registerGoTools.js";
 import { createRustBinaryService } from "../composition/rust.js";
 import type { RustBinaryService } from "../application/rust/RustBinaryService.js";
 import { registerRustTools } from "./registerRustTools.js";
+import { createBeamService } from "../composition/erlang.js";
+import type { BeamService } from "../application/erlang/BeamService.js";
+import { registerErlangTools } from "./registerErlangTools.js";
 import type { RecordedCrashService } from "../application/binaryDiagnostics/RecordedCrashService.js";
 import { registerAnalysisViewTool } from "./registerAnalysisViewTool.js";
 import { registerBinaryDiagnosticsTools } from "./registerBinaryDiagnosticsTools.js";
@@ -159,6 +162,7 @@ export interface CreateServerOptions {
   readonly binaryLayout?: BinaryLayoutService;
   readonly goBinary?: GoBinaryService;
   readonly rustBinary?: RustBinaryService;
+  readonly erlangBeam?: BeamService;
   readonly electronFuses?: ElectronFuseService;
   readonly recordedCrash?: RecordedCrashService;
   readonly firmwareAnalysis?: FirmwareAnalysisPort;
@@ -311,6 +315,7 @@ export const createServer = (
     options.webModuleTrace ?? createWebModuleTraceService(environment);
   const goBinary = options.goBinary ?? createGoBinaryService();
   const rustBinary = options.rustBinary ?? createRustBinaryService();
+  const erlangBeam = options.erlangBeam ?? createBeamService();
   const peResources = createPeResourcesService();
   const electronFuses = options.electronFuses ?? createElectronFuseService();
   const webNetworkCapture =
@@ -394,6 +399,7 @@ export const createServer = (
       webModuleTrace.close(),
       goBinary.close(),
       rustBinary.close(),
+      erlangBeam.close(),
       peResources.close(),
       electronFuses.close(),
       webNetworkCapture.close(),
@@ -456,6 +462,7 @@ export const createServer = (
     artifactResources,
     goBinary,
     rustBinary,
+    erlangBeam,
     peResources,
     electronFuses,
     webNetworkCapture,
@@ -656,6 +663,7 @@ const registerConfiguredAnalysisTools = (
     withAdmittedAnalysis,
     goBinary,
     rustBinary,
+    erlangBeam,
     peResources,
     webNetworkCapture,
   }: ServerToolContext,
@@ -713,6 +721,13 @@ const registerConfiguredAnalysisTools = (
   registerRustTools(
     server,
     rustBinary,
+    toolLogger,
+    recordEvidence,
+    withAdmittedAnalysis,
+  );
+  registerErlangTools(
+    server,
+    erlangBeam,
     toolLogger,
     recordEvidence,
     withAdmittedAnalysis,
@@ -824,6 +839,7 @@ const createSessionRecorders = (
 interface ServerToolContext extends ReturnType<typeof createSessionRecorders> {
   readonly goBinary: GoBinaryService;
   readonly rustBinary: RustBinaryService;
+  readonly erlangBeam: BeamService;
   readonly peResources: PeResourcesService;
   readonly electronFuses: ElectronFuseService;
   readonly webNetworkCapture: WebNetworkCaptureService;

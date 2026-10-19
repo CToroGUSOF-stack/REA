@@ -71,6 +71,8 @@ const SOURCE_PATHS = {
   goProvider: "dist/go/GoBinaryProvider.js",
   rustContracts: "dist/contracts/rust/rustToolContracts.js",
   rustProvider: "dist/rust/RustBinaryProvider.js",
+  erlangContracts: "dist/contracts/erlang/beamToolContracts.js",
+  erlangProvider: "dist/erlang/BeamProvider.js",
   artifactContracts: "dist/contracts/artifactToolContracts.js",
   managedContracts: "dist/contracts/managed/managedToolContracts.js",
   firmwareContracts: "dist/contracts/firmware/firmwareToolContracts.js",
