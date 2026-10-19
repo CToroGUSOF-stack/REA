@@ -399,7 +399,9 @@ const heapExhaustedWorker = (heapMb: number) =>
         "-e",
         `const heap = process.versions.bun === undefined ? require("node:v8").getHeapStatistics().heap_size_limit : null;
 process.stdout.write(JSON.stringify({ kind: "ready", heap_limit_bytes: heap }) + "\\n");
-require("node:readline").createInterface({ input: process.stdin }).once("line", () => {
+require("node:readline").createInterface({ input: process.stdin }).once("line", (line) => {
+  const { id } = JSON.parse(line);
+  process.stdout.write(JSON.stringify({ kind: "phase", id, phase: "static" }) + "\\n");
   process.stderr.write("FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory\\n");
   process.exit(134);
 });`,
