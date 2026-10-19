@@ -39,15 +39,16 @@ const X86_LDEFS = `<?xml version="1.0" encoding="UTF-8"?>
 `;
 
 // Fake installation inspection; the language catalog is a real directory.
+const hostPlatform = process.platform === "win32" ? "win32" : "linux";
 const host: GhidraInstallationHost = {
-  platform: "linux",
+  platform: hostPlatform,
   architecture: "x64",
   readText: () => "application.version=12.1.4\n",
   executable: () => true,
   probeJava: () => ({
     version: "21.0.11",
     major: 21,
-    home: "/jdk-21",
+    home: hostPlatform === "win32" ? "C:\\jdk-21" : "/jdk-21",
     bits: 64,
     runtime: "jdk",
   }),

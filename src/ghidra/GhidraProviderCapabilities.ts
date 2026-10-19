@@ -83,7 +83,7 @@ export const limitationsFor = (operation: string): readonly string[] => {
     case "inspect_native_load_image":
       return [
         ...common,
-        "Independent verification supports DOS MZ and explicitly selected COM, including measured COM entry context. Measured source mappings use inclusive end addresses and complete region digests; no target execution or project mutation occurs.",
+        "Independent verification supports DOS MZ, explicitly selected COM, and caller-supplied raw-binary targets, including measured COM entry context. Measured source mappings use inclusive end addresses and complete region digests; no target execution or project mutation occurs.",
       ];
     case "read_bytes":
       return [
