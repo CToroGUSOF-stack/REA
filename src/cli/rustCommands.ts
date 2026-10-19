@@ -17,7 +17,11 @@ export const registerRustCommands = (
     description:
       "Inspect an embedded cargo-auditable Rust dependency list without target execution",
     args: z.object({
-      path: z.string().describe("Local ELF, PE or thin Mach-O image"),
+      path: z
+        .string()
+        .describe(
+          "Local ELF, PE, thin Mach-O or WebAssembly core-module image",
+        ),
     }),
     run: ({ args }) =>
       withCommandCancellation((signal) => {

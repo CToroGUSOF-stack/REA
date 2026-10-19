@@ -170,11 +170,12 @@ explicit path or endpoint and do not need it.
   remain explicit. See the
   [Go binary guide](https://github.com/morluto/rea/blob/main/docs/go-binaries.md).
 - Embedded cargo-auditable Rust dependency metadata: `inspect_rust_binary`
-  with the explicit local ELF, PE, or thin Mach-O file. This built-in
-  target-free inspection requires no Rust installation or disassembler. Preserve
-  package order, dependency indices, and the section file range. A missing
-  `.dep-v0` section is null metadata, not proof the binary has no dependencies.
-  A rustc commit hash is an inference from a read-only `/rustc/<40-hex>/` path.
+  with the explicit local ELF, PE, thin Mach-O, or WebAssembly core-module
+  file. This built-in target-free inspection requires no Rust installation or
+  disassembler. Preserve package order, dependency indices, and the section file
+  range. A missing `.dep-v0` section is null metadata, not proof the binary has
+  no dependencies. A rustc commit hash is an inference from a
+  `/rustc/<40-hex>/` path in read-only data or a WebAssembly data section.
   See the
   [Rust binary guide](https://github.com/morluto/rea/blob/main/docs/rust-binaries.md).
 

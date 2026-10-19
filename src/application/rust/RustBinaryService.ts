@@ -19,6 +19,14 @@ import { completeProviderEvidence } from "../ProviderOperationExecution.js";
 
 const OPERATION = "inspect_rust_binary";
 
+/** Evidence subjects name native containers; a WebAssembly module is a file, as for WABT. */
+const SUBJECT_FORMATS = {
+  elf: "elf",
+  pe: "pe",
+  macho: "mach-o",
+  wasm: "file",
+} as const;
+
 const architectureForSubject = (architecture: string) => {
   switch (architecture) {
     case "386":
@@ -94,7 +102,7 @@ const evidenceFor = (
     {
       path: value.artifact.path,
       sha256: value.artifact.sha256,
-      format: value.format === "macho" ? "mach-o" : value.format,
+      format: SUBJECT_FORMATS[value.format],
       ...(architecture === undefined ? {} : { architecture }),
     },
     provider,

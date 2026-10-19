@@ -29,6 +29,7 @@ import {
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { err, ok, type Result } from "../domain/result.js";
 import { readRustBinaryImage } from "./RustBinaryImage.js";
+import { MAX_WASM_SECTIONS } from "./RustWasmImage.js";
 import {
   RUST_BINARY_INPUT_BYTES,
   RUST_OUTPUT_BYTES,
@@ -126,7 +127,12 @@ const limitationsFor = (
   image: ReturnType<typeof readRustBinaryImage>,
 ): string[] => [
   "Embedded dependency metadata is file content. It does not authenticate package names, versions, sources, or the compiler that produced the binary.",
-  "Only the .dep-v0 dependency section and read-only compiler path strings are inspected. Functions, types, and runtime behavior are not recovered.",
+  `Only the .dep-v0 dependency section and compiler path strings in ${compilerPathSource(image.format)} are inspected. Functions, types, and runtime behavior are not recovered.`,
+  ...(image.format === "wasm"
+    ? [
+        `WebAssembly declares no container word size, so bits is null. Memory address types were not inspected. Section framing is bounded to ${MAX_WASM_SECTIONS} sections.`,
+      ]
+    : []),
   "Resource guards bound the selected file to 256 MiB, a dependency section to 1 MiB, inflated JSON to the smaller of 8 MiB and 64 times the section size, and the complete report to 8 MiB. Package and dependency counts are admitted against that output budget before schema cloning, graph objects, or reverse-edge allocation.",
   ...(image.auditable_metadata === null
     ? [
@@ -145,8 +151,12 @@ const limitationsFor = (
         "Dependency indices contain a cycle. The cycle is reported and was not traversed.",
       ]
     : []),
-  ...rustcLimitation(image.rustc_commit),
+  ...rustcLimitation(image.rustc_commit, compilerPathSource(image.format)),
 ];
+
+/** rustc keeps constant path strings in native read-only data or WebAssembly data segments. */
+const compilerPathSource = (format: RustBinary["format"]): string =>
+  format === "wasm" ? "the WebAssembly data section" : "read-only data";
 
 const unknownFormatLimitation = (
   format: number | null | undefined,
@@ -164,17 +174,18 @@ const unknownFormatLimitation = (
 
 const rustcLimitation = (
   commit: ReturnType<typeof readRustBinaryImage>["rustc_commit"],
+  source: string,
 ): string[] => {
   if (commit === null)
     return [
-      "No /rustc/<40-hex>/ path was found in read-only data, so a rustc commit hash is unknown.",
+      `No /rustc/<40-hex>/ path was found in ${source}, so a rustc commit hash is unknown.`,
     ];
   if (commit.hashes.length === 1)
     return [
-      "The rustc commit hash is inferred from a /rustc/<40-hex>/ path in read-only data. It does not by itself prove which compiler produced the binary.",
+      `The rustc commit hash is inferred from a /rustc/<40-hex>/ path in ${source}. It does not by itself prove which compiler produced the binary.`,
     ];
   return [
-    "Read-only data contains more than one /rustc/<40-hex>/ path, so a single rustc commit is unknown.",
+    `More than one /rustc/<40-hex>/ path was found in ${source}, so a single rustc commit is unknown.`,
   ];
 };
 
