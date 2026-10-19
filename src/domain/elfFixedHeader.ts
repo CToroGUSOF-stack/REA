@@ -66,7 +66,7 @@ export const readElfFixedHeader = (
   });
 };
 
-const elfArchitecture = (
+export const elfArchitecture = (
   machine: number,
 ): Exclude<BinaryArchitecture, RawOnlyArchitecture> | undefined => {
   switch (machine) {

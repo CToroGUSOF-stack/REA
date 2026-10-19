@@ -9,8 +9,13 @@ import { wasmArtifactModule } from "../composition/wasm.js";
 import { registerWasmTools } from "./registerWasmTools.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
 import { captureProviderEnvironment } from "./providerEnvironment.js";
-import { createPeResourcesService } from "../composition/binaryDiagnostics.js";
+import {
+  createElfNotesService,
+  createPeResourcesService,
+} from "../composition/binaryDiagnostics.js";
+import type { ElfNotesService } from "../application/binaryDiagnostics/ElfNotesService.js";
 import type { PeResourcesService } from "../application/binaryDiagnostics/PeResourcesService.js";
+import { registerElfNotesTool } from "./registerElfNotesTool.js";
 import { registerPeResourcesTool } from "./registerPeResourcesTool.js";
 import type { EvmInterfaceService } from "../application/evm/EvmInterfaceService.js";
 import { evmInterfaceModule } from "../composition/evm.js";
@@ -312,6 +317,7 @@ export const createServer = (
   const goBinary = options.goBinary ?? createGoBinaryService();
   const rustBinary = options.rustBinary ?? createRustBinaryService();
   const peResources = createPeResourcesService();
+  const elfNotes = createElfNotesService();
   const electronFuses = options.electronFuses ?? createElectronFuseService();
   const webNetworkCapture =
     options.webNetworkCapture ?? createWebNetworkCaptureService(environment);
@@ -395,6 +401,7 @@ export const createServer = (
       goBinary.close(),
       rustBinary.close(),
       peResources.close(),
+      elfNotes.close(),
       electronFuses.close(),
       webNetworkCapture.close(),
       javascriptRecovery.close?.() ?? Promise.resolve(),
@@ -457,6 +464,7 @@ export const createServer = (
     goBinary,
     rustBinary,
     peResources,
+    elfNotes,
     electronFuses,
     webNetworkCapture,
   };
@@ -657,6 +665,7 @@ const registerConfiguredAnalysisTools = (
     goBinary,
     rustBinary,
     peResources,
+    elfNotes,
     webNetworkCapture,
   }: ServerToolContext,
   android: AndroidAnalysisPort,
@@ -699,6 +708,13 @@ const registerConfiguredAnalysisTools = (
   registerPeResourcesTool(
     server,
     peResources,
+    toolLogger,
+    recordEvidence,
+    withAdmittedAnalysis,
+  );
+  registerElfNotesTool(
+    server,
+    elfNotes,
     toolLogger,
     recordEvidence,
     withAdmittedAnalysis,
@@ -825,6 +841,7 @@ interface ServerToolContext extends ReturnType<typeof createSessionRecorders> {
   readonly goBinary: GoBinaryService;
   readonly rustBinary: RustBinaryService;
   readonly peResources: PeResourcesService;
+  readonly elfNotes: ElfNotesService;
   readonly electronFuses: ElectronFuseService;
   readonly webNetworkCapture: WebNetworkCaptureService;
   readonly artifactResources: ArtifactResourceScope;
