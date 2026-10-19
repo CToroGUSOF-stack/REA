@@ -10,6 +10,7 @@ import {
 import {
   artifactEdgeId,
   artifactIdForContent,
+  logicalPathNfc,
   occurrenceIdForLocation,
 } from "../../domain/artifactIdentity.js";
 import type { ArtifactEntry } from "../ArtifactReader.js";
@@ -110,7 +111,15 @@ export const createOccurrence = (
       entry.byteOffset === null || entry.declaredSize === null
         ? null
         : { offset: entry.byteOffset, length: entry.declaredSize },
-    limitations: [...entry.limitations],
+    limitations: [
+      ...entry.limitations,
+      // The logical path is NFC for lookup; keep the member's own spelling.
+      ...(logicalPathNfc(entry.path) === entry.path
+        ? []
+        : [
+            `Member name ${JSON.stringify(entry.path)} is not in Unicode NFC; its logical path uses the NFC spelling.`,
+          ]),
+    ],
   };
 };
 
