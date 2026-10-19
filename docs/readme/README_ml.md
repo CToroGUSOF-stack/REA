@@ -285,6 +285,7 @@ npx rea-agents@latest setup
 - [CLI and Evidence](../cli.md): commands, provider തിരഞ്ഞെടുക്കൽ, snapshots, import/export, exit statuses.
 - [MCP contracts](../mcp-contracts.md), [agent prompts](../mcp-prompts.md): tool results, sessions, guided investigations.
 - [Tool catalog](../mcp-contracts.md#generated-catalog): tools, providers, CLI commands എന്നിവയുടെ സ്വയമേവ സൃഷ്ടിച്ച പട്ടിക.
+- [ബ്രൗസർ വിപുലീകരണങ്ങൾ](../browser-extension-analysis.md): CRX, XPI, ZIP, അല്ലെങ്കിൽ പാക്ക് ചെയ്യാത്ത manifest പ്രഖ്യാപിക്കുന്ന ഉപരിതലങ്ങൾ.
 - [Roadmap](../roadmap.md): ആസൂത്രണം ചെയ്ത പ്രവർത്തനങ്ങളും capability trackers-ഉം.
 
 സുരക്ഷാ ദുർബലതകൾ [SECURITY.md](../../SECURITY.md) വഴി റിപ്പോർട്ട് ചെയ്യുക.

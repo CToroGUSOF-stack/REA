@@ -267,6 +267,7 @@ Zacznij od [przewodników z przykładami](https://rea.tools/pl/guides/) na stron
 - [CLI i Evidence](../cli.md): polecenia, wybór dostawcy, migawki, import/eksport i kody zakończenia.
 - [Kontrakty MCP](../mcp-contracts.md) i [prompty dla agentów](../mcp-prompts.md): wyniki narzędzi, sesje i prowadzone analizy.
 - [Katalog narzędzi](../mcp-contracts.md#generated-catalog): generowany podczas kompilacji wykaz narzędzi, dostawców i poleceń CLI.
+- [Rozszerzenia przeglądarki](../browser-extension-analysis.md): zadeklarowane powierzchnie z CRX, XPI, ZIP lub niepakietowanego manifestu.
 - [Plan rozwoju](../roadmap.md): planowane prace i śledzenie funkcjonalności.
 
 Zgłaszaj podatności zgodnie z [SECURITY.md](../../SECURITY.md).

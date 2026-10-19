@@ -39,6 +39,7 @@ export default defineConfig({
             link: "/javascript-application-workflows",
           },
           { text: "Browser observation", link: "/browser-observation" },
+          { text: "Browser extensions", link: "/browser-extension-analysis" },
           {
             text: "Web network captures",
             link: "/web-network-captures",

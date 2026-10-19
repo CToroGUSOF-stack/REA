@@ -13,6 +13,9 @@ import { captureProviderEnvironment } from "./providerEnvironment.js";
 import { createPeResourcesService } from "../composition/binaryDiagnostics.js";
 import type { PeResourcesService } from "../application/binaryDiagnostics/PeResourcesService.js";
 import { registerPeResourcesTool } from "./registerPeResourcesTool.js";
+import { createBrowserExtensionService } from "../composition/browserExtension.js";
+import type { BrowserExtensionService } from "../application/browserExtension/BrowserExtensionService.js";
+import { registerBrowserExtensionTool } from "./registerBrowserExtensionTool.js";
 import type { EvmInterfaceService } from "../application/evm/EvmInterfaceService.js";
 import { evmInterfaceModule } from "../composition/evm.js";
 import { registerEvmTools } from "./registerEvmTools.js";
@@ -312,6 +315,7 @@ export const createServer = (
   const goBinary = options.goBinary ?? createGoBinaryService();
   const rustBinary = options.rustBinary ?? createRustBinaryService();
   const peResources = createPeResourcesService();
+  const browserExtension = createBrowserExtensionService();
   const electronFuses = options.electronFuses ?? createElectronFuseService();
   const webNetworkCapture =
     options.webNetworkCapture ?? createWebNetworkCaptureService(environment);
@@ -396,6 +400,7 @@ export const createServer = (
       goBinary.close(),
       rustBinary.close(),
       peResources.close(),
+      browserExtension.close(),
       electronFuses.close(),
       webNetworkCapture.close(),
       javascriptRecovery.close?.() ?? Promise.resolve(),
@@ -458,6 +463,7 @@ export const createServer = (
     goBinary,
     rustBinary,
     peResources,
+    browserExtension,
     electronFuses,
     webNetworkCapture,
   };
@@ -666,6 +672,7 @@ const registerConfiguredAnalysisTools = (
     goBinary,
     rustBinary,
     peResources,
+    browserExtension,
     webNetworkCapture,
   }: ServerToolContext,
   android: AndroidAnalysisPort,
@@ -708,6 +715,13 @@ const registerConfiguredAnalysisTools = (
   registerPeResourcesTool(
     server,
     peResources,
+    toolLogger,
+    recordEvidence,
+    withAdmittedAnalysis,
+  );
+  registerBrowserExtensionTool(
+    server,
+    browserExtension,
     toolLogger,
     recordEvidence,
     withAdmittedAnalysis,
@@ -834,6 +848,7 @@ interface ServerToolContext extends ReturnType<typeof createSessionRecorders> {
   readonly goBinary: GoBinaryService;
   readonly rustBinary: RustBinaryService;
   readonly peResources: PeResourcesService;
+  readonly browserExtension: BrowserExtensionService;
   readonly electronFuses: ElectronFuseService;
   readonly webNetworkCapture: WebNetworkCaptureService;
   readonly artifactResources: ArtifactResourceScope;

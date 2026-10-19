@@ -267,6 +267,7 @@ Comece pelos [guias práticos](https://rea.tools/pt-BR/guides/) do site. Para op
 - [CLI e Evidence](../cli.md): comandos, seleção de provedores, snapshots, importação/exportação e status de saída.
 - [Contratos MCP](../mcp-contracts.md) e [prompts para agentes](../mcp-prompts.md): resultados das ferramentas, sessões e investigações guiadas.
 - [Catálogo de ferramentas](../mcp-contracts.md#generated-catalog): inventário de ferramentas, provedores e comandos da CLI gerado durante o build.
+- [Extensões de navegador](../browser-extension-analysis.md): superfícies declaradas de CRX, XPI, ZIP ou manifesto não empacotado.
 - [Roadmap](../roadmap.md): trabalho planejado e acompanhamento das capacidades.
 
 Relate vulnerabilidades conforme [SECURITY.md](../../SECURITY.md).

@@ -278,6 +278,7 @@ npx rea-agents@latest setup
 - [CLI 및 Evidence](../cli.md): 명령, 제공자 선택, 스냅샷, 가져오기/내보내기, 종료 상태.
 - [MCP 계약](../mcp-contracts.md) 및 [에이전트 프롬프트](../mcp-prompts.md): 도구 결과, 세션, 안내에 따른 조사.
 - [도구 카탈로그](../mcp-contracts.md#generated-catalog): 빌드 시 생성되는 도구, 제공자, CLI 명령 목록.
+- [브라우저 확장 프로그램](../browser-extension-analysis.md): CRX, XPI, ZIP 또는 압축되지 않은 매니페스트가 선언한 표면.
 - [로드맵](../roadmap.md): 계획된 작업과 기능 진행 상황.
 
 취약점은 [SECURITY.md](../../SECURITY.md)에 따라 보고하세요.

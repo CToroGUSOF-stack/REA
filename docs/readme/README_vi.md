@@ -267,6 +267,7 @@ Bắt đầu với [hướng dẫn thực hành](https://rea.tools/vi/guides/) t
 - [CLI và Evidence](../cli.md): lệnh, lựa chọn trình phân tích, ảnh chụp trạng thái, nhập/xuất và trạng thái thoát.
 - [Hợp đồng MCP](../mcp-contracts.md) và [prompt cho tác nhân](../mcp-prompts.md): kết quả công cụ, phiên làm việc và điều tra có hướng dẫn.
 - [Danh mục công cụ](../mcp-contracts.md#generated-catalog): danh sách công cụ, trình phân tích và lệnh CLI được tạo khi dựng dự án.
+- [Tiện ích mở rộng trình duyệt](../browser-extension-analysis.md): bề mặt được khai báo của CRX, XPI, ZIP hoặc manifest chưa đóng gói.
 - [Lộ trình](../roadmap.md): công việc dự kiến và theo dõi các khả năng.
 
 Báo cáo lỗ hổng theo [SECURITY.md](../../SECURITY.md).

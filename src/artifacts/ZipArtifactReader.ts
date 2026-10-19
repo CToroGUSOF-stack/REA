@@ -421,11 +421,17 @@ const ZIP_FAILURE_REASONS: ReadonlyMap<string, "format" | "unavailable"> =
   ]);
 
 /** Type a zip.js archive fault so consumers do not report it as file I/O. */
-const typedZipFailure = (cause: unknown): unknown => {
+export const zipArchiveFaultKind = (
+  cause: unknown,
+): "format" | "unavailable" | undefined => {
   if (!(cause instanceof Error) || cause instanceof ArtifactReaderFailure)
-    return cause;
-  const reason = ZIP_FAILURE_REASONS.get(cause.message);
-  if (reason === undefined) return cause;
+    return undefined;
+  return ZIP_FAILURE_REASONS.get(cause.message);
+};
+
+const typedZipFailure = (cause: unknown): unknown => {
+  const reason = zipArchiveFaultKind(cause);
+  if (reason === undefined || !(cause instanceof Error)) return cause;
   return new ArtifactReaderFailure(
     reason,
     reason === "format"

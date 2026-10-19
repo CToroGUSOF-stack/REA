@@ -269,6 +269,7 @@ npx rea-agents@latest setup
 - [CLI と Evidence](../cli.md)：コマンド、プロバイダーの選択、スナップショット、インポート／エクスポート、終了ステータス。
 - [MCP 契約](../mcp-contracts.md)と[エージェント向けプロンプト](../mcp-prompts.md)：ツールの結果、セッション、ガイド付き調査。
 - [ツールカタログ](../mcp-contracts.md#generated-catalog)：ビルド時に生成されるツール、プロバイダー、CLI コマンドの一覧。
+- [ブラウザ拡張機能](../browser-extension-analysis.md)：CRX、XPI、ZIP、または未パッケージのマニフェストが宣言するサーフェス。
 - [ロードマップ](../roadmap.md)：計画中の作業と機能の進捗。
 
 脆弱性の報告は [SECURITY.md](../../SECURITY.md) に従ってください。

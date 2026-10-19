@@ -269,6 +269,7 @@ npx rea-agents@latest setup
 - [CLI وEvidence](../cli.md): الأوامر، واختيار الموفّر، واللقطات، والاستيراد/التصدير، وحالات الخروج.
 - [عقود MCP](../mcp-contracts.md) و[تعليمات الوكلاء](../mcp-prompts.md): نتائج الأدوات، والجلسات، والاستقصاءات الموجّهة.
 - [كتالوج الأدوات](../mcp-contracts.md#generated-catalog): قائمة الأدوات والموفّرين وأوامر CLI المولّدة أثناء البناء.
+- [إضافات المتصفح](../browser-extension-analysis.md): الأسطح المعلنة في CRX أو XPI أو ZIP أو manifest غير محزَّم.
 - [خطة العمل](../roadmap.md): الأعمال المخطط لها ومتابعة القدرات.
 
 أبلغ عن الثغرات وفق [SECURITY.md](../../SECURITY.md).

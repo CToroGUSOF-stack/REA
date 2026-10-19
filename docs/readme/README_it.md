@@ -271,6 +271,7 @@ Inizia dalle [guide pratiche](https://rea.tools/it/guides/) del sito web. Per op
 - [CLI ed Evidence](../cli.md): comandi, selezione provider, snapshot, import/export e stati di uscita.
 - [Contratti MCP](../mcp-contracts.md) e [prompt agente](../mcp-prompts.md): risultati degli strumenti, sessioni e indagini guidate.
 - [Catalogo strumenti](../mcp-contracts.md#generated-catalog): inventario generato di strumenti, provider e comandi CLI.
+- [Estensioni del browser](../browser-extension-analysis.md): superfici dichiarate di CRX, XPI, ZIP o manifest non pacchettizzato.
 - [Roadmap](../roadmap.md): lavoro pianificato e tracker delle capacità.
 
 Segnala vulnerabilità tramite [SECURITY.md](../../SECURITY.md).

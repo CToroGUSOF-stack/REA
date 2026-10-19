@@ -49,6 +49,13 @@ export const PE_RESOURCES_PROVIDER = Object.freeze({
   version: "1",
 } as const);
 
+/** Provider identity for portable, execution-free browser-extension manifest projection. */
+export const BROWSER_EXTENSION_PROVIDER = Object.freeze({
+  id: "rea-browser-extension",
+  name: "REA browser extension parser",
+  version: "1",
+} as const);
+
 /** Provider identity for deterministic managed-code comparison workflows. */
 export const MANAGED_WORKFLOW_PROVIDER = {
   id: "rea-dotnet-workflows",

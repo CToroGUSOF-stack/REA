@@ -252,6 +252,7 @@ npx rea-agents@latest setup
 - [CLI و شواهد](../cli.md): دستورات، انتخاب ارائه‌دهنده، snapshotها، ورود/خروج داده و وضعیت‌های خروج.
 - [قراردادهای MCP](../mcp-contracts.md) و [پرامپت‌های ایجنت](../mcp-prompts.md): نتایج ابزارها، نشست‌ها و بررسی‌های هدایت‌شده.
 - [فهرست ابزارها](../mcp-contracts.md#generated-catalog): فهرست تولیدشده هنگام build از ابزارها، ارائه‌دهندگان و دستورات CLI.
+- [افزونه‌های مرورگر](../browser-extension-analysis.md): سطوح اعلام‌شده در CRX، XPI، ZIP یا manifest بازنشده.
 - [نقشهٔ راه](../roadmap.md): برنامه‌های آینده و پیگیری قابلیت‌ها.
 
 آسیب‌پذیری‌ها را از طریق [SECURITY.md](../../SECURITY.md) گزارش کنید.

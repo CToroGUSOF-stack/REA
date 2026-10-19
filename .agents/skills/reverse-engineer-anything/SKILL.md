@@ -199,6 +199,11 @@ explicit path or endpoint and do not need it.
 - PE resource type/name/language trees and static icon group references:
   `inspect_pe_resources` with an explicit path. This portable operation requires
   no active target or engine; opaque payloads retain file ranges and SHA-256.
+- CRX, XPI, ZIP, or unpacked `manifest.json`:
+  `inspect_browser_extension` with an explicit file path. This reads the declared
+  manifest surface only. It does not load the extension, verify a CRX signature,
+  or parse extension code. See the
+  [browser extension guide](https://github.com/morluto/rea/blob/main/docs/browser-extension-analysis.md).
 - Native executable, library, or analysis database: `open_binary`, then
   use focused analysis tools directly; call `binary_overview` when metadata or
   inventory context is useful and available from the selected provider.

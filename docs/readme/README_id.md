@@ -292,6 +292,7 @@ Untuk mengetahui opsi, prasyarat, dan kontrak hasil secara tepat:
 - [CLI dan Bukti](../cli.md): perintah, pemilihan penyedia, snapshot, impor/ekspor, dan status keluar.
 - [Kontrak MCP](../mcp-contracts.md) dan [prompt agen](../mcp-prompts.md): hasil alat, sesi, dan investigasi terpandu.
 - [Katalog alat](../mcp-contracts.md#generated-catalog): inventaris alat, penyedia, dan perintah CLI yang dibuat secara otomatis.
+- [Ekstensi peramban](../browser-extension-analysis.md): permukaan yang dideklarasikan dari CRX, XPI, ZIP, atau manifest yang belum dikemas.
 - [Peta jalan](../roadmap.md): pekerjaan yang direncanakan dan pelacak kemampuan.
 
 Laporkan kerentanan melalui [SECURITY.md](../../SECURITY.md).

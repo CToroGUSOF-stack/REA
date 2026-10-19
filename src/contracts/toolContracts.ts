@@ -6,6 +6,7 @@ import { DESKTOP_APPLICATION_TOOL_CONTRACTS } from "./desktopApplicationToolCont
 import { GO_TOOL_CONTRACTS } from "./go/goToolContracts.js";
 import { RUST_TOOL_CONTRACTS } from "./rust/rustToolContracts.js";
 import { SQLITE_TOOL_CONTRACTS } from "./sqlite/sqliteToolContracts.js";
+import { BROWSER_EXTENSION_TOOL_CONTRACTS } from "./browserExtension/browserExtensionToolContracts.js";
 import { ANALYSIS_VIEW_TOOL_CONTRACTS } from "./analysisViewToolContracts.js";
 import { BINARY_DIAGNOSTICS_TOOL_CONTRACTS } from "./native/binaryDiagnosticsToolContracts.js";
 import { NATIVE_TOOL_CONTRACTS } from "./native/nativeToolContracts.js";
@@ -50,6 +51,7 @@ export const TOOL_CONTRACTS = [
   ...RUST_TOOL_CONTRACTS,
   ...WASM_TOOL_CONTRACTS,
   ...SQLITE_TOOL_CONTRACTS,
+  ...BROWSER_EXTENSION_TOOL_CONTRACTS,
   ...CAPTURE_TOOL_CONTRACTS,
   ...SIGNAL_TOOL_CONTRACTS,
   ...MANAGED_TOOL_CONTRACTS,

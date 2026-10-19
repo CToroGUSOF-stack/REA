@@ -273,6 +273,7 @@ npx rea-agents@latest setup
 - [CLI 与 Evidence](../cli.md)：命令、提供方选择、快照、导入/导出和退出状态。
 - [MCP 契约](../mcp-contracts.md)和[智能体提示词](../mcp-prompts.md)：工具结果、会话和引导式调查。
 - [工具目录](../mcp-contracts.md#generated-catalog)：构建时生成的工具、提供方和 CLI 命令清单。
+- [浏览器扩展](../browser-extension-analysis.md)：CRX、XPI、ZIP 或未打包清单声明的接口面。
 - [路线图](../roadmap.md)：计划中的工作和能力跟踪。
 
 请按照 [SECURITY.md](../../SECURITY.md) 报告漏洞。
