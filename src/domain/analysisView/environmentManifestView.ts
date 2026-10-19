@@ -10,7 +10,7 @@ import type {
 } from "./analysisView.js";
 import { EnvironmentManifestAccumulator } from "./EnvironmentManifestAccumulator.js";
 import { TEMPLATE_RULES } from "./environmentManifestRules.js";
-import { admitHarCaptureParent } from "./WebNetworkProjectionAccumulator.js";
+import { admitWebNetworkCaptureParent } from "./WebNetworkProjectionAccumulator.js";
 import { ROUTE_RULES } from "./webNetworkRouteTemplates.js";
 
 export const environmentManifestViewRequestSchema = z.strictObject({
@@ -139,7 +139,7 @@ export const projectEnvironmentManifestView = (
         `View ${view.kind} is unsupported for parent operation ${parent.operation}; environment-manifest requires inspect_web_network_capture.`,
       ),
     );
-  const admitted = admitHarCaptureParent(
+  const admitted = admitWebNetworkCaptureParent(
     parent,
     "environment-manifest",
     accumulator,

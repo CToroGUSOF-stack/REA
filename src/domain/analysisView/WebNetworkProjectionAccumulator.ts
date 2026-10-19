@@ -19,7 +19,7 @@ import {
   type Reserve,
 } from "./webNetworkRouteTemplates.js";
 
-/** Shared retained/temporary byte accounting for views that group retained HAR records. */
+/** Shared retained/temporary byte accounting for views that group retained capture records. */
 export abstract class WebNetworkProjectionAccumulator {
   readonly #limitations = new Set<string>();
   #retainedBytes = 0;
@@ -91,12 +91,12 @@ export abstract class WebNetworkProjectionAccumulator {
   }
 }
 
-/** Authenticate and gate a retained HAR parent before a grouping view reads any record. */
-export const admitHarCaptureParent = (
+/** Authenticate and gate a retained capture parent before a grouping view reads any record. */
+export const admitWebNetworkCaptureParent = (
   parent: AnalysisViewParent,
   viewKind: "api-surface" | "environment-manifest",
   accumulator: WebNetworkProjectionAccumulator,
-): Result<WebNetworkCapture, AnalysisError> => {
+): Result<WebNetworkCapture & { format: "har" | "saz" }, AnalysisError> => {
   const unsupported = (reason: string) =>
     err(
       new AnalysisUnsupportedTargetError(
@@ -123,7 +123,11 @@ export const admitHarCaptureParent = (
         },
       ]),
     );
-  if (parsed.data.format !== "har")
+  const { format } = parsed.data;
+  if (
+    (format !== "har" && format !== "saz") ||
+    (viewKind === "environment-manifest" && format !== "har")
+  )
     return unsupported(
       `${viewKind} does not support capture format ${parsed.data.format}.`,
     );
@@ -154,5 +158,5 @@ export const admitHarCaptureParent = (
     .safeParse(parent.parameters);
   if (!declarations.success || declarations.data.sensitive_value_count > 0)
     return unsupported("sensitive_values_unretained");
-  return ok(parsed.data);
+  return ok({ ...parsed.data, format });
 };
