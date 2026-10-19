@@ -33,7 +33,10 @@ import { registerAnalysisViewTool } from "./registerAnalysisViewTool.js";
 import { registerBinaryDiagnosticsTools } from "./registerBinaryDiagnosticsTools.js";
 import { FridaInstrumentationManager } from "../frida/FridaInstrumentationManager.js";
 import { registerFridaTools } from "./registerFridaTools.js";
-import { createBinaryLayoutService } from "../composition/binaryDiagnostics.js";
+import {
+  createByteEntropyService,
+  createBinaryLayoutService,
+} from "../composition/binaryDiagnostics.js";
 import type { BinaryLayoutService } from "../application/binaryDiagnostics/BinaryLayoutService.js";
 import { EvidenceMcpServer } from "./EvidenceMcpServer.js";
 import {
@@ -684,6 +687,7 @@ const registerConfiguredAnalysisTools = (
   registerBinaryDiagnosticsTools(
     server,
     options.binaryLayout ?? createBinaryLayoutService(environment),
+    createByteEntropyService(),
     toolLogger,
     recordEvidence,
     evidenceById,

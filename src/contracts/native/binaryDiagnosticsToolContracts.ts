@@ -1,3 +1,5 @@
+import { inspectByteEntropyInputSchema } from "../../domain/native/byteEntropy.js";
+import { byteEntropyOutputSchema } from "../toolOutputSchemaGroups.js";
 import {
   inspectRecordedCrashInputSchema,
   recordedCrashSchema,
@@ -25,6 +27,33 @@ export const inspectBinaryLayoutRequestSchema =
 
 /** Offline binary diagnostics are independent of macOS process/UI providers. */
 export const BINARY_DIAGNOSTICS_TOOL_CONTRACTS = [
+  {
+    name: "inspect_byte_entropy",
+    ...toolContractMetadata("inspect_byte_entropy"),
+    kind: "native-provider",
+    description:
+      "Inspect Shannon byte entropy for one explicit local file offline, without execution, extraction or external tools. Returns file-wide SHA-256 and entropy, fixed-block entropy for an optional offset/length window, and adjacent high (>=7.2) and low (<=1.0) runs with exact file offsets. Block size is a power of two from 256 to 65536 (default 4096). Entropy cannot distinguish compression from encryption. Summary detail retains complete Evidence and returns file entropy plus the ten longest runs; retrieve parent Evidence for the full series. The entire file is read even for a window.",
+    inputSchema: inspectByteEntropyInputSchema.extend({
+      detail: analysisDetailSchema,
+    }),
+    outputSchema: byteEntropyOutputSchema,
+    examples: [
+      {
+        title: "Profile firmware bytes before extraction",
+        input: { path: "/artifacts/firmware.bin" },
+      },
+      {
+        title: "Summarize a selected byte window",
+        input: {
+          path: "/artifacts/firmware.bin",
+          offset: 4096,
+          length: 65536,
+          block_size: 4096,
+          detail: "summary",
+        },
+      },
+    ],
+  },
   {
     name: "inspect_pe_resources",
     ...toolContractMetadata("inspect_pe_resources"),

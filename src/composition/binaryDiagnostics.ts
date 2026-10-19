@@ -1,3 +1,4 @@
+import { ByteEntropyService } from "../application/binaryDiagnostics/ByteEntropyService.js";
 import { RecordedCrashService } from "../application/binaryDiagnostics/RecordedCrashService.js";
 import { PwntoolsRecordedCrashProvider } from "../native/pwntools/PwntoolsRecordedCrashProvider.js";
 import { BinaryLayoutService } from "../application/binaryDiagnostics/BinaryLayoutService.js";
@@ -20,3 +21,7 @@ export const createRecordedCrashService = (
   environment: Readonly<NodeJS.ProcessEnv> = process.env,
 ): RecordedCrashService =>
   new RecordedCrashService(new PwntoolsRecordedCrashProvider(environment));
+
+/** Provider-free local byte analysis. */
+export const createByteEntropyService = (): ByteEntropyService =>
+  new ByteEntropyService();

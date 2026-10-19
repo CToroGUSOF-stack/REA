@@ -1,3 +1,6 @@
+import { byteEntropySchema } from "../domain/native/byteEntropy.js";
+import { byteEntropySummaryViewResultSchema } from "../domain/analysisView/analysisView.js";
+import { analysisDetailOutputSchemaOf } from "./analysisDetail.js";
 import { z } from "zod";
 import { byteSearchResultSchema } from "../domain/native/bytePattern.js";
 import {
@@ -389,8 +392,15 @@ export const enhancedOutputSchemas: Readonly<Record<string, z.ZodObject>> = {
   trace_call_path: callPathTraceOutput,
 };
 
+/** Complete entropy Evidence or its retained summary, shared by the named contract. */
+export const byteEntropyOutputSchema = analysisDetailOutputSchemaOf(
+  byteEntropySchema,
+  byteEntropySummaryViewResultSchema,
+);
+
 /** Exact Evidence schemas for provider-neutral native inspection. */
 export const nativeOutputSchemas: Readonly<Record<string, z.ZodObject>> = {
+  inspect_byte_entropy: byteEntropyOutputSchema,
   observe_native_ui: evidenceResultOf(nativeUiResultSchema),
   capture_native_ui_scenario: evidenceResultOf(nativeUiResultSchema),
   observe_native_calls: evidenceResultOf(nativeCallObservationResultSchema),

@@ -1,3 +1,8 @@
+import { byteEntropySchema } from "../native/byteEntropy.js";
+import {
+  byteEntropySummarySchema,
+  projectByteEntropyView,
+} from "./byteEntropyView.js";
 import { z } from "zod";
 import {
   javascriptModuleReferencesRequestSchema,
@@ -350,6 +355,7 @@ const inventorySummarySchema = z.strictObject({
 const viewResultBase = {
   parent_evidence_id: prefixedDigestSchema("ev"),
   parent_operation: z.enum([
+    "inspect_byte_entropy",
     "inspect_binary_layout",
     "analyze_javascript_application",
     "analyze_function",
@@ -379,6 +385,12 @@ const summaryViewResultBase = {
   view: summaryViewSchema,
   ...viewResultBase,
 } as const;
+
+export const byteEntropySummaryViewResultSchema = z.strictObject({
+  ...summaryViewResultBase,
+  summary: byteEntropySummarySchema,
+  parent_operation: z.literal("inspect_byte_entropy"),
+});
 
 /** Summary `inspect_binary_layout` detail returns; no other view kind. */
 export const binaryLayoutSummaryViewResultSchema = z.strictObject({
@@ -513,6 +525,7 @@ export const analysisViewResultSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     ...summaryViewResultBase,
     summary: z.union([
+      byteEntropySummarySchema,
       layoutSummarySchema,
       javascriptSummarySchema,
       inventorySummarySchema,
@@ -862,6 +875,22 @@ export const projectAnalysisView = (
   }
   if (parent.operation === "inspect_pcap_capture") {
     const projected = projectPcapCaptureView(parent, view);
+    return projected.ok ? ok(sealAnalysisView(projected.value)) : projected;
+  }
+  if (parent.operation === "inspect_byte_entropy") {
+    const report = byteEntropySchema.safeParse(parent.normalizedResult);
+    if (!report.success)
+      return err(
+        analysisViewInputError([
+          {
+            path: ["source"],
+            reason: "invalid_value",
+            message:
+              "Parent Evidence result does not match inspect_byte_entropy.",
+          },
+        ]),
+      );
+    const projected = projectByteEntropyView(parent, report.data, view);
     return projected.ok ? ok(sealAnalysisView(projected.value)) : projected;
   }
   if (parent.operation === "inspect_binary_layout") {
