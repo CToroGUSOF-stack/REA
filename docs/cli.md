@@ -95,6 +95,18 @@ dependency edges, and the section's file range. A missing `.dep-v0` section is
 null metadata, not proof that the binary has no dependencies. See
 [Rust binaries](rust-binaries.md).
 
+Inspect a PE Authenticode certificate table without executing the image or
+verifying signatures:
+
+```bash
+rea inspect-pe-certificates /absolute/path/to/application.exe --json
+```
+
+The workflow reports `WIN_CERTIFICATE` entries and, for PKCS#7 signedData,
+embedded X.509 serial, issuer, subject, and validity fields. A missing security
+directory is observed absence of that table. See
+[PE Authenticode certificate tables](pe-certificates.md).
+
 Configure [Hopper or Ghidra](installation.md#hopper), the
 [IDA adapter](ida-provider.md), or [Kuna](kuna-provider.md) before analyzing a
 native target. Substitute

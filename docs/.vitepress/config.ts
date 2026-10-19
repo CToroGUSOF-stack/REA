@@ -30,6 +30,7 @@ export default defineConfig({
           { text: "Native binaries", link: "/native-investigation" },
           { text: "Go build metadata", link: "/go-binaries" },
           { text: "Rust dependencies", link: "/rust-binaries" },
+          { text: "PE certificates", link: "/pe-certificates" },
           {
             text: "JavaScript and Electron",
             link: "/javascript-artifact-reconstruction",

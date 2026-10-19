@@ -4,10 +4,16 @@ import { BinaryLayoutService } from "../application/binaryDiagnostics/BinaryLayo
 import { PwntoolsLayoutProvider } from "../native/pwntools/PwntoolsLayoutProvider.js";
 import { PeResourcesService } from "../application/binaryDiagnostics/PeResourcesService.js";
 import { PeResourcesProvider } from "../native/pe/PeResourcesProvider.js";
+import { PeCertificatesService } from "../application/binaryDiagnostics/PeCertificatesService.js";
+import { PeCertificatesProvider } from "../native/pe/PeCertificatesProvider.js";
 
 /** Portable PE inspection with no engine, installation or target acquisition. */
 export const createPeResourcesService = (): PeResourcesService =>
   new PeResourcesService(new PeResourcesProvider());
+
+/** Portable Authenticode table inspection with no engine or catalog verification. */
+export const createPeCertificatesService = (): PeCertificatesService =>
+  new PeCertificatesService(new PeCertificatesProvider());
 
 /** Compose the offline adapter without import-time I/O or dependency acquisition. */
 export const createBinaryLayoutService = (

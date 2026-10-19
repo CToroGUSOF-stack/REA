@@ -177,6 +177,13 @@ explicit path or endpoint and do not need it.
   A rustc commit hash is an inference from a read-only `/rustc/<40-hex>/` path.
   See the
   [Rust binary guide](https://github.com/morluto/rea/blob/main/docs/rust-binaries.md).
+- PE Authenticode certificate table: `inspect_pe_certificates` with the explicit
+  local PE32/PE32+ file. This built-in target-free inspection requires no
+  Windows SDK. Preserve WIN_CERTIFICATE ranges, types, payload SHA-256, and
+  PKCS#7 signer/X.509 identity fields. A missing security directory is observed
+  absence of that table, not proof the image is unsigned in every catalog sense.
+  Signatures are not verified. See the
+  [PE certificate guide](https://github.com/morluto/rea/blob/main/docs/pe-certificates.md).
 
 - Explicit local SQLite database snapshot: `inspect_sqlite_database`. Inspect
   with Node.js 24.x >=24.15 or 26+ providing native SQLite limits. Read schema
