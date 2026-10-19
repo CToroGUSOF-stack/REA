@@ -1,6 +1,6 @@
 import type { BinaryTarget } from "../../domain/binaryTargetTypes.js";
 import { binaryTargetSummary } from "./BinaryTargetSummary.js";
-import type { JsonValue } from "../../domain/jsonValue.js";
+import { jsonObjectSchema, type JsonValue } from "../../domain/jsonValue.js";
 import type { ProviderOperationHealth } from "../../domain/providerOperationHealth.js";
 import type {
   CapabilityDescriptor,
@@ -10,6 +10,7 @@ import type {
 } from "../AnalysisProvider.js";
 import {
   PROVIDER_EFFECT_NAMES,
+  sessionProvider,
   type ProviderCapabilitySet,
 } from "../../contracts/toolOutputSchemaPrimitives.js";
 import type {
@@ -112,6 +113,51 @@ export const binarySessionStatus = async ({
         ...binaryTargetSummary(target),
       };
 };
+
+/** Capability surfaces a registration may narrow without hiding provider facts. */
+const advertisedCapabilitySurfaces = sessionProvider.pick({
+  capabilities: true,
+  analysis_provider_candidates: true,
+});
+
+/**
+ * Restrict a session status report to operations whose tools the caller
+ * advertises. Availability must already be computed from the complete status:
+ * composed tools still depend on direct operations this projection hides.
+ */
+export const restrictAdvertisedCapabilities = (
+  status: unknown,
+  isOperationAdvertised: (operation: string) => boolean,
+): Readonly<Record<string, JsonValue>> => {
+  const object = jsonObjectSchema.parse(status);
+  const { capabilities, analysis_provider_candidates } =
+    advertisedCapabilitySurfaces.parse(object);
+  return jsonObjectSchema.parse({
+    ...object,
+    capabilities: restrictCapabilitySets(capabilities, isOperationAdvertised),
+    analysis_provider_candidates: analysis_provider_candidates.map(
+      (candidate) => ({
+        ...candidate,
+        capabilities: restrictCapabilitySets(
+          candidate.capabilities,
+          isOperationAdvertised,
+        ),
+      }),
+    ),
+  });
+};
+
+const restrictCapabilitySets = (
+  sets: readonly ProviderCapabilitySet[],
+  isOperationAdvertised: (operation: string) => boolean,
+): ProviderCapabilitySet[] =>
+  sets.flatMap((set) => {
+    const groups = set.groups.flatMap((group) => {
+      const operations = group.operations.filter(isOperationAdvertised);
+      return operations.length === 0 ? [] : [{ ...group, operations }];
+    });
+    return groups.length === 0 ? [] : [{ ...set, groups }];
+  });
 
 const requestActivityStatus = (
   snapshots: readonly ProviderRequestActivitySnapshot[],

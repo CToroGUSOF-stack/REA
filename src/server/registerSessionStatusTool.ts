@@ -8,6 +8,7 @@ import {
   buildCapabilityInventory,
   compactToolAvailability,
 } from "../application/CapabilityInventory.js";
+import { restrictAdvertisedCapabilities } from "../application/binary/BinarySessionStatus.js";
 import { toolContract } from "../contracts/toolContracts.js";
 import type {
   ClientFeatureAvailability,
@@ -69,17 +70,29 @@ export const registerSessionStatusTool = (
         context,
         server.server,
       );
-      let androidAvailability: ProviderAvailability;
+      let androidAvailability: ProviderAvailability | undefined;
       let adbAvailability: ProviderAvailability | undefined;
       let apktoolAvailability: ProviderAvailability | undefined;
       let jebAvailability: JebAnalysisAvailability | undefined;
       let status: JsonValue;
       try {
+        // Probe only families this registration advertises. Scoped-out
+        // providers keep the established not-configured shape instead of
+        // launching probes whose tools cannot appear in the response.
         const [android, adb, apktool, jeb] = await Promise.all([
-          androidAnalysisAvailability(context.mcpReq.signal),
-          adbAnalysisAvailability?.(context.mcpReq.signal) ?? undefined,
-          apktoolAnalysisAvailability?.(context.mcpReq.signal) ?? undefined,
-          jebAnalysisAvailability?.(context.mcpReq.signal) ?? undefined,
+          server.advertisesFamily("android")
+            ? androidAnalysisAvailability(context.mcpReq.signal)
+            : undefined,
+          server.advertisesFamily("adb")
+            ? (adbAnalysisAvailability?.(context.mcpReq.signal) ?? undefined)
+            : undefined,
+          server.advertisesFamily("apktool")
+            ? (apktoolAnalysisAvailability?.(context.mcpReq.signal) ??
+              undefined)
+            : undefined,
+          server.advertisesFamily("jeb")
+            ? (jebAnalysisAvailability?.(context.mcpReq.signal) ?? undefined)
+            : undefined,
         ] as const);
         androidAvailability = android;
         adbAvailability = adb;
@@ -91,23 +104,25 @@ export const registerSessionStatusTool = (
         return server.delivery.toCallToolResult(err(cause), contract);
       }
       const statusObject = jsonObjectSchema.parse(status);
-      const toolAvailability = buildCapabilityInventory(
+      // Availability must be derived from the complete provider facts: an
+      // advertised composed tool still depends on direct operations the
+      // registration hides. Narrow the public report only after this.
+      const toolAvailability = sessionToolAvailability({
+        server,
         status,
-        {
-          ...availabilityPolicy(),
-          androidAnalysisAvailability: androidAvailability,
-          ...(adbAvailability === undefined
+        policy: availabilityPolicy(),
+        clientFeatures,
+        probes: {
+          ...(androidAvailability === undefined
             ? {}
-            : { adbAnalysisAvailability: adbAvailability }),
+            : { android: androidAvailability }),
+          ...(adbAvailability === undefined ? {} : { adb: adbAvailability }),
           ...(apktoolAvailability === undefined
             ? {}
-            : { apktoolAnalysisAvailability: apktoolAvailability }),
-          ...(jebAvailability === undefined
-            ? {}
-            : { jebAnalysisAvailability: jebAvailability }),
+            : { apktool: apktoolAvailability }),
+          ...(jebAvailability === undefined ? {} : { jeb: jebAvailability }),
         },
-        clientFeatures,
-      );
+      });
       const serverIdentity = createServerIdentity({
         startedAt,
         commandPath: CURRENT_ENTRYPOINT_PATH,
@@ -130,7 +145,9 @@ export const registerSessionStatusTool = (
         {
           ok: true,
           value: projectSessionStatus({
-            status: statusObject,
+            status: restrictAdvertisedCapabilities(statusObject, (operation) =>
+              server.advertisesTool(operation),
+            ),
             toolAvailability,
             serverIdentity,
             clientFeatures,
@@ -141,6 +158,38 @@ export const registerSessionStatusTool = (
     },
   );
 };
+
+const sessionToolAvailability = (options: {
+  readonly server: EvidenceMcpServer;
+  readonly status: JsonValue;
+  readonly policy: AvailabilityPolicy;
+  readonly clientFeatures: ClientFeatureAvailability;
+  readonly probes: {
+    readonly android?: ProviderAvailability;
+    readonly adb?: ProviderAvailability;
+    readonly apktool?: ProviderAvailability;
+    readonly jeb?: JebAnalysisAvailability;
+  };
+}): readonly ToolAvailability[] =>
+  buildCapabilityInventory(
+    options.status,
+    {
+      ...options.policy,
+      ...(options.probes.android === undefined
+        ? {}
+        : { androidAnalysisAvailability: options.probes.android }),
+      ...(options.probes.adb === undefined
+        ? {}
+        : { adbAnalysisAvailability: options.probes.adb }),
+      ...(options.probes.apktool === undefined
+        ? {}
+        : { apktoolAnalysisAvailability: options.probes.apktool }),
+      ...(options.probes.jeb === undefined
+        ? {}
+        : { jebAnalysisAvailability: options.probes.jeb }),
+    },
+    options.clientFeatures,
+  ).filter(({ name }) => options.server.advertisesTool(name));
 
 const projectSessionStatus = (options: {
   readonly status: Readonly<

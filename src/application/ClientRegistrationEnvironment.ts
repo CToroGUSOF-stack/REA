@@ -55,9 +55,14 @@ export const clientRegistrationEnvironmentDetails = (
       validation,
     );
     if (!environment.ok) return environment;
+    // The document already validated effective semantics with
+    // expression-backed keys recorded as unresolved. Revalidating the
+    // stripped map would misread those keys as absent (e.g. a literal
+    // REA_GHIDRA_COMPILER_SPEC_ID with an expression-backed language), so
+    // timeout facts derive from syntax validation only.
     return validatedDetails(
       environment.value,
-      validation,
+      "fragment",
       resolveProviderRequestBudget,
     );
   }
