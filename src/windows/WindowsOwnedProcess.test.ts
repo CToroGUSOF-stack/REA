@@ -41,6 +41,8 @@ const authority = (
     readonly polls?: readonly unknown[];
     readonly appliedLimit?: (requested: unknown) => unknown;
     readonly failClose?: () => boolean;
+    /** Native write result, awaited by the process before it releases the job. */
+    readonly stdinWrite?: (bytes: Buffer) => unknown;
   } = {},
 ) => {
   const calls: { operation: string; arguments_: readonly unknown[] }[] = [];
@@ -83,6 +85,11 @@ const authority = (
             : {}),
         };
       if (operation === "process_poll") return polls.shift();
+      if (operation === "process_stdin_write") {
+        const bytes = arguments_[1] as Buffer;
+        return options.stdinWrite?.(bytes) ?? bytes.length;
+      }
+      if (operation === "process_stdin_close") return null;
       if (operation === "process_terminate") return true;
       if (operation === "process_close") {
         if (options.failClose?.()) throw new Error("native close failed");
@@ -93,6 +100,17 @@ const authority = (
   };
   return { native, calls };
 };
+
+/** Launch a process that owns the writable protocol stdin pipe. */
+const launchWithInput = (native: WindowsNativeAuthority): WindowsOwnedProcess =>
+  new WindowsOwnedProcess(
+    "C:\\runtime\\bun.exe",
+    ["worker.js"],
+    "C:\\work",
+    {},
+    false,
+    { authority: native, protocolStdin: true },
+  );
 
 const launch = (
   native: WindowsNativeAuthority,
@@ -245,6 +263,113 @@ describe("Windows Job Object memory limits", () => {
       appliedLimit: () => LIMIT - 4096,
     });
     expect(() => launch(native, LIMIT)).toThrow();
+  });
+});
+
+describe("Windows owned process input", () => {
+  it("reports a delivered write before an exited job releases the stream", async () => {
+    vi.useFakeTimers();
+    try {
+      let deliver: ((written: number) => void) | undefined;
+      const written = new Promise<number>((resolve) => {
+        deliver = resolve;
+      });
+      const { native, calls } = authority({
+        polls: [{ ...settledPoll }],
+        stdinWrite: (bytes) => written.then(() => bytes.length),
+      });
+      const child = launchWithInput(native);
+      const failures: string[] = [];
+      child.stdin?.on("error", (error: Error) => failures.push(error.message));
+      const delivered = new Promise<void>((resolve, reject) => {
+        child.stdin?.write("body", (error) =>
+          error === undefined || error === null ? resolve() : reject(error),
+        );
+      });
+
+      // The job exits while the native write is still in flight.
+      await vi.advanceTimersByTimeAsync(25);
+      expect(calls.some(({ operation }) => operation === "process_close")).toBe(
+        false,
+      );
+
+      deliver?.(4);
+      await delivered;
+      await vi.advanceTimersByTimeAsync(25);
+      expect(failures).toEqual([]);
+      expect(calls.some(({ operation }) => operation === "process_close")).toBe(
+        true,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports a deferred release failure instead of rejecting the host", async () => {
+    vi.useFakeTimers();
+    try {
+      let deliver: ((written: number) => void) | undefined;
+      const written = new Promise<number>((resolve) => {
+        deliver = resolve;
+      });
+      let shouldFailClose = true;
+      const { native, calls } = authority({
+        polls: [{ ...settledPoll }, { ...settledPoll }],
+        failClose: () => shouldFailClose,
+        stdinWrite: (bytes) => written.then(() => bytes.length),
+      });
+      const child = launchWithInput(native);
+      const failures: string[] = [];
+      child.on("error", (error: Error) => failures.push(error.message));
+      child.stdin?.on("error", () => undefined);
+      const delivered = new Promise<void>((resolve) => {
+        child.stdin?.write("body", () => resolve());
+      });
+
+      await vi.advanceTimersByTimeAsync(25);
+      deliver?.(4);
+      await delivered;
+      await vi.advanceTimersByTimeAsync(25);
+
+      // The native close failure is reported on the error channel and the
+      // job stays owned for a cleanup retry.
+      expect(failures).toContain("native close failed");
+      expect(
+        calls.filter(({ operation }) => operation === "process_close"),
+      ).toHaveLength(1);
+      shouldFailClose = false;
+      const cleanup = child.cleanup();
+      await vi.advanceTimersByTimeAsync(25);
+      expect(await cleanup).toMatchObject({ cleaned: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a genuine write failure visible", async () => {
+    vi.useFakeTimers();
+    try {
+      const { native } = authority({
+        polls: [{ ...settledPoll }],
+        stdinWrite: (bytes) => bytes.length - 1,
+      });
+      const child = launchWithInput(native);
+      // A failed write also reaches the stream's error channel.
+      child.stdin?.on("error", () => undefined);
+      const failure = new Promise<Error>((resolve) => {
+        child.stdin?.write("body", (error?: Error | null) =>
+          resolve(error ?? new Error("write reported no error")),
+        );
+      });
+      await vi.advanceTimersByTimeAsync(25);
+      const error = await failure;
+      expect(error).toBeInstanceOf(Error);
+      expect(error.message).toContain(
+        "Owned Windows input write did not preserve all requested bytes",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

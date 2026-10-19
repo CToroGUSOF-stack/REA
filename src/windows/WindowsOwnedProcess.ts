@@ -35,6 +35,9 @@ const limitedPollSchema = pollSchema.extend({
     .max(Number.MAX_SAFE_INTEGER),
 });
 
+/** Bound on waiting for an in-flight native write before the job is released. */
+const INPUT_SETTLE_MS = 5_000;
+
 /** Optional native job controls for one owned Windows process tree. */
 export interface WindowsOwnedProcessOptions {
   /** Open a writable protocol pipe; otherwise stdin is NUL. */
@@ -75,6 +78,8 @@ export class WindowsOwnedProcess extends EventEmitter {
   #memoryLimitReached = false;
   #peakJobMemoryBytes: number | undefined;
   #outputIncomplete = false;
+  /** Native input write that has not reported its delivery yet. */
+  #pendingWrite: Promise<void> | undefined;
 
   constructor(
     command: string,
@@ -135,12 +140,23 @@ export class WindowsOwnedProcess extends EventEmitter {
     this.stdin = protocolStdin
       ? new Writable({
           write: (chunk: unknown, _encoding, callback) => {
-            void this.#writeInput(chunk).then(
-              () => callback(),
-              (cause: unknown) =>
+            const write = this.#writeInput(chunk);
+            // The native write is the delivery proof; the job may exit before
+            // it reports, so it stays owned until it answers.
+            this.#pendingWrite = write;
+            void write.then(
+              () => {
+                if (this.#pendingWrite === write)
+                  this.#pendingWrite = undefined;
+                callback();
+              },
+              (cause: unknown) => {
+                if (this.#pendingWrite === write)
+                  this.#pendingWrite = undefined;
                 callback(
                   cause instanceof Error ? cause : new Error(String(cause)),
-                ),
+                );
+              },
             );
           },
           final: (callback) => {
@@ -356,13 +372,18 @@ export class WindowsOwnedProcess extends EventEmitter {
         this.#release();
       } else this.#schedule(idle ? 25 : 0);
     } catch (cause: unknown) {
-      const failure = cause instanceof Error ? cause : new Error(String(cause));
-      this.#failure = failure.message;
-      // Native lifecycle failures belong to the error/cleanup channels, never
-      // the captured stderr observation produced by the child itself.
-      if (this.listenerCount("error") > 0) this.emit("error", failure);
-      // Retain the original job so explicit cleanup can retry its observation.
+      this.#reportLifecycleFailure(cause);
     }
+  }
+
+  /** Report a native lifecycle failure on the error and cleanup channels. */
+  #reportLifecycleFailure(cause: unknown): void {
+    const failure = cause instanceof Error ? cause : new Error(String(cause));
+    this.#failure = failure.message;
+    // Native lifecycle failures belong to the error/cleanup channels, never
+    // the captured stderr observation produced by the child itself.
+    if (this.listenerCount("error") > 0) this.emit("error", failure);
+    // Retain the original job so explicit cleanup can retry its observation.
   }
 
   #writeOutput(stream: PassThrough, bytes: Buffer): void {
@@ -387,6 +408,38 @@ export class WindowsOwnedProcess extends EventEmitter {
     if (this.#closed) return;
     if (this.#timer !== undefined) clearTimeout(this.#timer);
     this.#clearBlockedWake();
+    // A native write that is still in flight may already have delivered the
+    // bytes. It reports before the stream is torn down, so a delivered input
+    // is never reported as a failed write.
+    const pending = this.#pendingWrite;
+    if (pending === undefined) {
+      this.#releaseStreams();
+      return;
+    }
+    this.#pendingWrite = undefined;
+    const settled = pending.then(
+      () => undefined,
+      () => undefined,
+    );
+    const deadline = new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, INPUT_SETTLE_MS);
+      timer.unref?.();
+    });
+    void Promise.race([settled, deadline]).then(() => {
+      try {
+        this.#releaseStreams();
+      } catch (cause: unknown) {
+        // The deferred release reports through the same error and cleanup
+        // channels as the synchronous one; a native close failure must never
+        // escape as an unhandled rejection.
+        this.#reportLifecycleFailure(cause);
+      }
+    });
+  }
+
+  /** End the local streams and release the native handle exactly once. */
+  #releaseStreams(): void {
+    if (this.#closed) return;
     this.stdin?.destroy();
     if (!this.stdout.destroyed) this.stdout.end();
     if (!this.stderr.destroyed) this.stderr.end();

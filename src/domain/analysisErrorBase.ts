@@ -235,6 +235,7 @@ import type {
 } from "./adb/adbDeviceAnalysis.js";
 import type { InspectSignature } from "./native/nativeInspection.js";
 import type { NativeUiObservationResult } from "./native/nativeUiObservation.js";
+import type { AdbUiPartialObservation } from "./adb/adbUiAnalysis.js";
 import type { BinaryLayout } from "./native/binaryLayout.js";
 import type {
   RecordedCrash,
@@ -284,4 +285,5 @@ export type AnalysisPartialObservation =
   | ElectronPagePartialObservation
   | AdbActivityStartPartialObservation
   | AdbAcquiredFilePartialObservation
-  | AdbPackagePullPartialObservation;
+  | AdbPackagePullPartialObservation
+  | AdbUiPartialObservation;

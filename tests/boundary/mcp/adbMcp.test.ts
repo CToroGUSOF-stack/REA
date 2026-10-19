@@ -1,12 +1,19 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { expect, it, onTestFinished } from "vitest";
 
+import { z } from "zod";
+
 import type { AdbDeviceAnalysisPort } from "../../../src/application/adb/AdbDeviceAnalysisPort.js";
-import { createAnalysisExecution } from "../../../src/application/AnalysisProvider.js";
+import {
+  createAnalysisExecution,
+  createAnalysisExecutionEvidence,
+} from "../../../src/application/AnalysisProvider.js";
+import { AnalysisCancelledError } from "../../../src/domain/analysisErrorCore.js";
 import { parseEvidence } from "../../../src/domain/evidence.js";
-import { ok } from "../../../src/domain/result.js";
+import { err, ok } from "../../../src/domain/result.js";
 import { createServer } from "../../../src/server/createServer.js";
 import { createTestBinarySession } from "../../fixtures/binarySession.js";
+import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
 import { assertAdvertisedMcpContracts } from "./mcpContractHarness.js";
 
 const identity = { id: "adb", name: "Android Debug Bridge", version: null };
@@ -325,6 +332,10 @@ it("advertises exact valid ADB schemas and records inline evidence through MCP",
     "list_adb_services",
     "inspect_adb_display",
     "inspect_adb_window",
+    "inspect_adb_ui",
+    "find_adb_ui_elements",
+    "wait_for_adb_ui",
+    "perform_adb_ui_action",
     "read_adb_setting",
     "collect_adb_bugreport",
     "resolve_adb_packages",
@@ -395,4 +406,102 @@ it("rejects invalid tool input before reaching the provider", async () => {
     .map((part) => part.text ?? "")
     .join("");
   expect(text).toContain("Invalid arguments for tool inspect_adb_device");
+});
+
+it("exports recovered UI action Evidence recorded from a failed action", async () => {
+  const input = {
+    serial: "emulator-5554",
+    package: "com.example.app",
+    snapshot_id: "00000000-0000-4000-8000-000000000002",
+    element_id: "0",
+    action: { kind: "tap" },
+  };
+  // The producer composes the recovered observation into the same Evidence a
+  // successful call returns; this test covers the session's recording of it.
+  const recovered = createAnalysisExecutionEvidence(
+    "perform_adb_ui_action",
+    input,
+    createAnalysisExecution(
+      {
+        client: clientIdentity,
+        serial: input.serial,
+        runner: {
+          package_name: "dev.rea.uiautomator",
+          instance_id: "00000000-0000-4000-8000-000000000001",
+          version: "0.2.0",
+          ui_automator_version: "2.4.0",
+          sdk_int: 36,
+        },
+        before: { id: input.snapshot_id, captured_at_ms: 1 },
+        selected_element: null,
+        dispatch_attempted: true,
+        action_completed: true,
+        action_error: null,
+        text_verified: null,
+        can_scroll_more: null,
+        after: null,
+        observation_failure: null,
+      },
+      identity,
+    ),
+    "observed",
+    "controlled-replay",
+  );
+  const provider: AdbDeviceAnalysisPort = {
+    async inspectAvailability() {
+      return { status: "available", code: null, reason: null, diagnostics: {} };
+    },
+    async close() {},
+    async execute(request) {
+      if (request.operation !== "perform_adb_ui_action")
+        return ok(
+          createAnalysisExecution(results[request.operation], identity),
+        );
+      return err(
+        new AnalysisCancelledError("perform_adb_ui_action", {
+          cause: new Error("cancelled during final acknowledgement"),
+          partialObservation: recovered,
+        }),
+      );
+    },
+  };
+  const session = createTestBinarySession(() => {
+    throw new Error("deep provider must not start");
+  });
+  const server = createServer(
+    { kind: "session", session },
+    { adbDeviceAnalysis: provider },
+  );
+  onTestFinished(() => server.close());
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new Client({
+    name: "adb-recovered-evidence",
+    version: "0.0.0",
+  });
+  onTestFinished(() => client.close());
+  await client.connect(clientTransport);
+
+  const reply = await client.callTool({
+    name: "perform_adb_ui_action",
+    arguments: input,
+  });
+  const { error } = parseMcpToolError(reply);
+  expect(error.code).toBe("cancelled");
+  const reference = z
+    .object({
+      partial_observation: z.object({
+        kind: z.literal("retained-evidence"),
+        evidence_id: z.string(),
+      }),
+    })
+    .parse(error.details).partial_observation;
+  expect(session.evidenceById(reference.evidence_id)).toMatchObject({
+    operation: "perform_adb_ui_action",
+    authority: "controlled-replay",
+    confidence: "observed",
+    parameters: input,
+    normalized_result: { dispatch_attempted: true, action_completed: true },
+  });
 });
