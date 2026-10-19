@@ -4,6 +4,7 @@ import { isAbsolute } from "node:path";
 import { localPathStringSchema } from "../domain/localPath.js";
 import { artifactComparisonInputSchema } from "../domain/artifactComparison.js";
 import { bundleComparisonInputSchema } from "../domain/bundleComparison.js";
+import { evidenceAuditInputSchema } from "../domain/evidenceAudit.js";
 import { callPathInputSchema } from "../domain/callPathSchemas.js";
 import { changedBehaviorInputSchema } from "../domain/changedBehavior.js";
 import { functionComparisonInputSchema } from "../domain/functionComparisonSchemas.js";
@@ -116,6 +117,11 @@ export const SESSION_TOOL_CONTRACTS = [
     "compare_bundles",
     "Compare two canonical Evidence bundles by exact record membership, explicit one-to-one observation pairs, and complete residual-unknown revision histories. Missing bundle members describe omission only, never behavioral equivalence; output is digest-anchored and returns every change inline.",
     bundleComparisonInputSchema,
+  ),
+  session(
+    "audit_evidence_bundle",
+    "Audit one canonical Evidence bundle for leaked credentials, host identifiers, and local paths without mutating anything. Findings report Evidence IDs, JSON pointers, lengths, and short hash prefixes; matched values are never printed, so the report is safe to paste into a public issue. A clean report does not prove a bundle is safe to publish.",
+    evidenceAuditInputSchema,
   ),
   session(
     "find_changed_behavior",
