@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -50,7 +50,7 @@ describe("reverse engineering command services", () => {
       if (!result.ok) return;
       expect(calls).toEqual([
         {
-          command: "/tools/objdump",
+          command: resolve("/tools/objdump"),
           args: ["-W", "-WK", path],
           env: expect.objectContaining({ DEBUGINFOD_URLS: "" }),
         },
@@ -194,7 +194,7 @@ it("uses one selected environment snapshot for provider selection and execution"
     expect(result.ok).toBe(true);
     expect(calls).toEqual([
       {
-        command: "/selected/rizin",
+        command: resolve("/selected/rizin"),
         env: {
           REA_RIZIN_COMMAND: "/selected/rizin",
           PATH: "/selected/bin",
@@ -307,7 +307,7 @@ describe("Rizin command service", () => {
       if (!result.ok) return;
       expect(calls).toEqual([
         {
-          command: "/tools/rizin",
+          command: resolve("/tools/rizin"),
           args: ["-N", "-q", "-c", "iI", path],
         },
       ]);
@@ -326,7 +326,7 @@ describe("Rizin command service", () => {
       expect(result.value.limitations).toHaveLength(4);
       expect(result.value.parameters).toMatchObject({
         command: "iI",
-        provider_executable: "/tools/rizin",
+        provider_executable: resolve("/tools/rizin"),
       });
       expect(result.value.provider.id).toBe("rizin");
     } finally {
