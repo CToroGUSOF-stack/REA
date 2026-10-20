@@ -33,6 +33,8 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
+import { ArtifactResourceScope } from "../../src/artifacts/ArtifactResourceScope.js";
+import { createDeferred } from "../fixtures/binarySession.js";
 import { CutterBridgeClient } from "../../src/cutter/CutterBridgeClient.js";
 import { AnalysisCancelledError } from "../../src/domain/analysisErrorCore.js";
 import { AnalysisError } from "../../src/domain/analysisErrorBase.js";
@@ -208,38 +210,48 @@ it.each([null, "primitive abort", new Error("selected abort")])(
 
 it("does not assign a peer's later cancellation to a descriptor that already failed close", async () => {
   const root = await createTestTempDirectory("rea-cutter-peer-finalization-");
-  await Promise.all([descriptor(root, 1), descriptor(root, 2)]);
+  const paths = await Promise.all([descriptor(root, 1), descriptor(root, 2)]);
   fault.root = root;
   const controller = new AbortController();
   const reason = new Error("cancel after the first descriptor failure");
-  let entered!: () => void;
-  let release!: () => void;
-  const waiting = new Promise<void>((resolve) => {
-    entered = resolve;
-  });
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
+  const waiting = createDeferred<void>();
+  const gate = createDeferred<void>();
+  const firstFinalized = createDeferred<void>();
+  const retainedPaths: string[] = [];
+  const retain = ArtifactResourceScope.prototype.retain;
+  const retention = vi
+    .spyOn(ArtifactResourceScope.prototype, "retain")
+    .mockImplementation(function (this: ArtifactResourceScope, owner) {
+      retain.call(this, owner);
+      if (paths.includes(owner.resource)) {
+        retainedPaths.push(owner.resource);
+        firstFinalized.resolve();
+      }
+    });
   fault.onClose = async (handle) => {
     if (handle === fault.handles[0]) return;
-    entered();
-    await gate;
+    waiting.resolve();
+    await gate.promise;
   };
   const client = new CutterBridgeClient({ REA_CUTTER_BRIDGE_DIR: root });
   const reading = client
     .listSessions({ signal: controller.signal })
     .catch((cause: unknown) => cause);
   try {
-    await waiting;
-    await new Promise((resolve) => setImmediate(resolve));
+    // A peer entering close does not prove this descriptor finalized: its
+    // earlier metadata/read may still be pending. Wait for the real owner to
+    // retain the failed close, after its completion facts have been captured.
+    await Promise.all([waiting.promise, firstFinalized.promise]);
+    expect(retainedPaths).toHaveLength(1);
     controller.abort(reason);
-    release();
+    gate.resolve();
     const failure = await reading;
     if (
       !(failure instanceof AnalysisError) ||
       !(failure.cause instanceof AggregateError)
     )
       throw new Error("Expected mixed descriptor cleanup failures");
+    expect(retainedPaths).toHaveLength(2);
     const failures: unknown[] = failure.cause.errors;
     expect(failures).toHaveLength(2);
     const cancelled = failures.filter(
@@ -257,11 +269,15 @@ it("does not assign a peer's later cancellation to a descriptor that already fai
     await client.close();
     expect(failure.cleanupIncomplete).toBe(false);
   } finally {
-    release();
+    gate.resolve();
     fault.onClose = undefined;
     fault.blocked.clear();
-    await reading;
-    await client.close();
+    try {
+      await reading;
+      await client.close();
+    } finally {
+      retention.mockRestore();
+    }
   }
 });
 

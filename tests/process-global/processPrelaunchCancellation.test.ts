@@ -6,11 +6,12 @@ import { parseProcessScenario } from "../../src/domain/process/processScenario.j
 import { emptyProcessCapture } from "../../src/domain/process/processCapture.fixture.js";
 
 const control = vi.hoisted(() => ({
-  stage: "none" as "none" | "before" | "open" | "final-stat" | "close",
+  stage: "none" as "none" | "before" | "open" | "read" | "final-stat" | "close",
   controller: undefined as AbortController | undefined,
   reason: undefined as Error | undefined,
   handle: undefined as FileHandle | undefined,
   sampled: false,
+  reads: 0,
   closed: false,
   launches: 0,
 }));
@@ -57,7 +58,9 @@ vi.mock("node:fs/promises", async (load) => {
         position: number | bigint | null,
       ) => {
         const result = await nativeRead(buffer, offset, length, position);
+        control.reads += 1;
         if (result.bytesRead === 0) control.sampled = true;
+        if (control.stage === "read") control.controller?.abort(control.reason);
         return result;
       }) as typeof handle.read;
       handle.stat = (async (...parameters: Parameters<typeof handle.stat>) => {
@@ -84,7 +87,7 @@ afterEach(() => {
   control.handle = undefined;
 });
 
-it.each(["none", "before", "open", "final-stat", "close"] as const)(
+it.each(["none", "before", "open", "read", "final-stat", "close"] as const)(
   "gates launch on cancellation at %s while releasing startup resources",
   async (stage) => {
     const controller = new AbortController();
@@ -94,6 +97,7 @@ it.each(["none", "before", "open", "final-stat", "close"] as const)(
       controller,
       reason,
       sampled: false,
+      reads: 0,
       closed: false,
       launches: 0,
     });
@@ -144,7 +148,9 @@ it.each(["none", "before", "open", "final-stat", "close"] as const)(
       const removedRoot = removed[0];
       if (removedRoot === undefined) throw new Error("Expected removed root");
       await expect(stat(removedRoot)).rejects.toMatchObject({ code: "ENOENT" });
-      expect(control.sampled).toBe(stage !== "open");
+      expect(control.sampled).toBe(stage !== "open" && stage !== "read");
+      expect(control.reads > 0).toBe(stage !== "open");
+      if (stage === "read") expect(control.reads).toBe(1);
     }
   },
 );

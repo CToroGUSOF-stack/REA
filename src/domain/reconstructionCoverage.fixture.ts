@@ -158,3 +158,28 @@ export const completeReconstructionCoverageFixture = () => {
     throw new Error("Expected complete reconstruction coverage fixture");
   return { workspace, result, boundary };
 };
+
+/** Build a declared dependency inventory using the complete coverage fixture. */
+export const dependencyReconstructionCoverageData = (
+  dependencies: Readonly<Record<string, readonly string[]>>,
+  observedAt = new Date(RECONSTRUCTION_COVERAGE_NOW).toISOString(),
+) => {
+  const coverage = completeReconstructionCoverageData();
+  const surface = coverage.surfaces[0];
+  if (surface === undefined) throw new Error("Expected fixture surface");
+  return createReconstructionCoverageData({
+    ...coverage,
+    surfaces: Object.entries(dependencies).map(
+      ([surfaceId, dependencyIds]) => ({
+        ...surface,
+        surface_id: surfaceId,
+        occurrence_id: null,
+        dependency_surface_ids: [...dependencyIds],
+      }),
+    ),
+    verifier_results: coverage.verifier_results.map((result) => ({
+      ...result,
+      observed_at: observedAt,
+    })),
+  });
+};

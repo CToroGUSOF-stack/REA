@@ -1,7 +1,6 @@
-import { mkdir, open, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { expect, it, vi } from "vitest";
 
 const injected = vi.hoisted(() => ({
@@ -31,35 +30,11 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
+import { createApplicationMcpHarness } from "../fixtures/applicationMcpHarness.js";
 import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
-import { createTestBinarySession } from "../fixtures/binarySession.js";
 import { parseMcpToolError } from "../fixtures/mcpToolError.js";
-import type { AnalysisClient } from "../../src/application/AnalysisProvider.js";
-import { observed } from "../fixtures/analysisExecution.js";
-import { createServer } from "../../src/server/createServer.js";
 import { silentLogger } from "../../src/logger.js";
 import { ToolResultDelivery } from "../../src/server/toolResult.js";
-import { ok } from "../../src/domain/result.js";
-
-const connectSession = async () => {
-  const session = createTestBinarySession(
-    () =>
-      ({
-        execute: () => Promise.resolve(observed(null)),
-        close: () => Promise.resolve(ok(null)),
-      }) satisfies AnalysisClient,
-  );
-  const server = createServer(
-    { kind: "session", session },
-    { logger: silentLogger },
-  );
-  const client = new Client({ name: "process-snapshot-cleanup", version: "1" });
-  const [clientTransport, serverTransport] =
-    InMemoryTransport.createLinkedPair();
-  await server.connect(serverTransport);
-  await client.connect(clientTransport);
-  return { client, server, session };
-};
 
 it("retains and retries the exact snapshot file handle through public MCP capture", async () => {
   const root = await createTestTempDirectory("rea-process-snapshot-cleanup-");
@@ -70,7 +45,9 @@ it("retains and retries the exact snapshot file handle through public MCP captur
   injected.path = resolve(filePath);
   injected.failClose = true;
   injected.opens = 0;
-  const resources = await connectSession();
+  const resources = await createApplicationMcpHarness({
+    serverOptions: { logger: silentLogger },
+  });
   const delivery = vi.spyOn(ToolResultDelivery.prototype, "toCallToolResult");
   const capture = () =>
     resources.client.callTool({
@@ -87,6 +64,7 @@ it("retains and retries the exact snapshot file handle through public MCP captur
 
   try {
     const failed = parseMcpToolError(await capture());
+    await resources.client.ping();
     expect(injected.opens, JSON.stringify(failed)).toBe(1);
     expect(injected.handle?.fd).toBeGreaterThanOrEqual(0);
     expect(failed.error).toMatchObject({
@@ -141,6 +119,7 @@ it("retains and retries the exact snapshot file handle through public MCP captur
     expect(firstDelivered.error.cleanupResources).toEqual([]);
 
     const recovered = await capture();
+    await resources.client.ping();
     expect(recovered.isError, JSON.stringify(recovered.content)).not.toBe(true);
     expect(injected.opens).toBe(3);
     expect(recovered.structuredContent).toMatchObject({
@@ -163,11 +142,7 @@ it("retains and retries the exact snapshot file handle through public MCP captur
       expect(cleanup.isError, JSON.stringify(cleanup.content)).not.toBe(true);
     }
     delivery.mockRestore();
-    await resources.client.close();
-    await resources.server.close();
-    const closed = await resources.session.close();
-    expect(closed.ok).toBe(true);
-    await rm(root, { recursive: true, force: true });
+    await resources.close();
     injected.path = "";
     injected.handle = undefined;
   }

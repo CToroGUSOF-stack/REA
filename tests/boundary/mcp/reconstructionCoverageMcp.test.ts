@@ -1,10 +1,13 @@
+import { createApplicationMcpHarness } from "../../fixtures/applicationMcpHarness.js";
+import { advertisedMcpToolSchemas } from "../../fixtures/advertisedMcpTool.js";
 import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
 import { ok as resultOk } from "../../../src/domain/result.js";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 
 import {
   completeReconstructionCoverageData,
+  dependencyReconstructionCoverageData,
   reconstructionCoverageEvidenceId,
 } from "../../../src/domain/reconstructionCoverage.fixture.js";
 import { createReconstructionCoverageData } from "../../../src/domain/reconstructionCoverage.js";
@@ -179,3 +182,58 @@ const currentFixtureCoverage = (boundaryId: string) => {
     })),
   });
 };
+
+it("withholds closure for a transitive inventory gap and repairs it on the same MCP connection", async () => {
+  const harness = await createApplicationMcpHarness();
+  onTestFinished(harness.close);
+  const { client } = harness;
+  const { name, ajv, inputSchema, outputSchema } =
+    await advertisedMcpToolSchemas(client, "evaluate_reconstruction_coverage");
+  const boundaryId = "replacement.cli";
+  const observedAt = new Date().toISOString();
+  const broken = dependencyReconstructionCoverageData(
+    { "cli.help": ["dep"], dep: ["absent"] },
+    observedAt,
+  );
+  const args = { coverage: broken, boundary_id: boundaryId };
+  expect(ajv.validate(inputSchema, args)).toBe(true);
+  const result = await client.callTool({ name, arguments: args });
+  expect(result.isError).not.toBe(true);
+  expect(ajv.validate(outputSchema, result.structuredContent)).toBe(true);
+  expect(result.structuredContent).toMatchObject({
+    status: "partial",
+    reasons: [{ code: "dependency-surface-missing", subject_id: "dep" }],
+  });
+  await client.ping();
+  const invalid = await client.callTool({
+    name,
+    arguments: { coverage: broken, boundary_id: "missing.boundary" },
+  });
+  expect(invalid.isError).toBe(true);
+  expect(parseMcpToolError(invalid)).toMatchObject({
+    error: { code: "invalid_request" },
+  });
+  await client.ping();
+  const repaired = dependencyReconstructionCoverageData(
+    { "cli.help": ["dep"], dep: ["absent"], absent: [] },
+    observedAt,
+  );
+  const retry = await client.callTool({
+    name,
+    arguments: { coverage: repaired, boundary_id: boundaryId },
+  });
+  expect(retry.isError).not.toBe(true);
+  expect(ajv.validate(outputSchema, retry.structuredContent)).toBe(true);
+  expect(retry.structuredContent).toMatchObject({
+    status: "ready",
+    reasons: [],
+    summary: { required_surfaces: 1 },
+  });
+  await client.ping();
+  const session = await client.callTool({
+    name: "binary_session",
+    arguments: {},
+  });
+  expect(session.isError, JSON.stringify(session)).not.toBe(true);
+  expect(session.structuredContent).toMatchObject({ result: { open: false } });
+});

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   completeReconstructionCoverageData,
+  dependencyReconstructionCoverageData,
   completeReconstructionCoverageFixture,
   RECONSTRUCTION_COVERAGE_NOW,
   reconstructionCoverageEvidenceId,
@@ -544,4 +545,125 @@ describe("reconstruction coverage verifier future timestamps", () => {
       ]),
     );
   });
+});
+
+describe("reconstruction dependency inventory", () => {
+  it.each([true, false])(
+    "includes dependency-only Evidence exactly when reachable: %s",
+    (reachable) => {
+      const coverage = dependencyReconstructionCoverageData({
+        "cli.help": reachable ? ["dep"] : [],
+        dep: [],
+      });
+      const input = createReconstructionCoverageData({
+        ...coverage,
+        surfaces: coverage.surfaces.map((surface) =>
+          surface.surface_id === "dep"
+            ? {
+                ...surface,
+                evidence_ids: [reconstructionCoverageEvidenceId("1")],
+              }
+            : surface,
+        ),
+      });
+      const result = evaluateReconstructionClosure(
+        input,
+        "replacement.cli",
+        RECONSTRUCTION_COVERAGE_NOW,
+      );
+      expect(result.status).toBe("ready");
+      expect(
+        result.evidence_ids.includes(reconstructionCoverageEvidenceId("1")),
+      ).toBe(reachable);
+      expect(result.evidence_ids).toContain(
+        reconstructionCoverageEvidenceId("2"),
+      );
+    },
+  );
+
+  const cases: Array<{
+    name: string;
+    edges: Readonly<Record<string, readonly string[]>>;
+    status: "ready" | "partial";
+    subject: string | null;
+  }> = [
+    {
+      name: "direct missing dependency",
+      edges: { "cli.help": ["absent"] },
+      status: "partial",
+      subject: "cli.help",
+    },
+    {
+      name: "transitive missing dependency",
+      edges: { "cli.help": ["dep"], dep: ["absent"] },
+      status: "partial",
+      subject: "dep",
+    },
+    {
+      name: "shared missing frontier",
+      edges: {
+        "cli.help": ["left", "right"],
+        left: ["shared"],
+        right: ["shared"],
+        shared: ["absent"],
+      },
+      status: "partial",
+      subject: "shared",
+    },
+    {
+      name: "cycle with missing dependency",
+      edges: { "cli.help": ["dep"], dep: ["cli.help", "absent"] },
+      status: "partial",
+      subject: "dep",
+    },
+    {
+      name: "complete cycle",
+      edges: { "cli.help": ["dep"], dep: ["cli.help"] },
+      status: "ready",
+      subject: null,
+    },
+    {
+      name: "unrelated missing dependency",
+      edges: { "cli.help": [], unrelated: ["absent"] },
+      status: "ready",
+      subject: null,
+    },
+  ];
+  it.each(cases)(
+    "checks the reachable inventory for $name",
+    ({ edges, status, subject }) => {
+      const coverage = dependencyReconstructionCoverageData(edges);
+      const original = JSON.stringify(coverage);
+      const result = evaluateReconstructionClosure(
+        coverage,
+        "replacement.cli",
+        RECONSTRUCTION_COVERAGE_NOW,
+      );
+      expect(result.status).toBe(status);
+      expect(result.summary.required_surfaces).toBe(1);
+      expect(result.reasons).toEqual(
+        subject === null
+          ? []
+          : [
+              {
+                code: "dependency-surface-missing",
+                subject_id: subject,
+                detail: "Declared dependency surface is absent: absent",
+              },
+            ],
+      );
+      expect(result.recommended_probes).toEqual(
+        subject === null
+          ? []
+          : [
+              {
+                operation: "update_authoritative_inventory",
+                subject_id: subject,
+                rationale: "Declared dependency surface is absent: absent",
+              },
+            ],
+      );
+      expect(JSON.stringify(coverage)).toBe(original);
+    },
+  );
 });
