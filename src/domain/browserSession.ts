@@ -12,7 +12,7 @@ export const observeWebSessionInputSchema = z.strictObject({
   cdp_endpoint: browserObservationEndpointSchema,
   allowed_origins: browserAllowedOriginsSchema,
   target_id: z.string().trim().min(1),
-  observation_ms: z.number().int().min(1).default(10_000),
+  observation_ms: z.number().int().min(1).max(2_147_483_647).default(10_000),
 });
 export type ObserveWebSessionInput = z.infer<
   typeof observeWebSessionInputSchema
