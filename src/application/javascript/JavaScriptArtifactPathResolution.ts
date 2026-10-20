@@ -499,6 +499,9 @@ const contextualCandidate = (
   }
   const hasUrlPathSemantics =
     context === "module-specifier" && input.moduleKind === "import";
+  // Node classifies relative module paths before applying URL text rules.
+  const isModulePath =
+    isRelativeJavaScriptModuleSpecifier(declared) || declared.startsWith("/");
   if (hasUrlPathSemantics) declared = htmlUrlText(declared);
   const rejected = rejectDeclaration(
     declared,
@@ -510,11 +513,7 @@ const contextualCandidate = (
       return unresolvedCandidate("external", [
         "URL and Node builtin schemes are outside static artifact module resolution.",
       ]);
-    if (
-      !isRelativeJavaScriptModuleSpecifier(declared) &&
-      !declared.startsWith("/")
-    )
-      return bareModuleCandidate(input);
+    if (!isModulePath) return bareModuleCandidate(input);
     if (input.moduleKind !== "require") {
       if (/%(?:2f|5c)/iu.test(stripQueryAndFragment(declared)))
         return unresolvedCandidate("rejected", [

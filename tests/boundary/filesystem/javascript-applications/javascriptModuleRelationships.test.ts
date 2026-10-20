@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
@@ -37,6 +39,72 @@ const relationshipGraph = async (root: string) => {
     await reader.close();
   }
 };
+
+it("classifies raw specifiers before normalizing relative module URL paths", async () => {
+  const cases = [
+    [" ./dep.mjs", "ERR_MODULE_NOT_FOUND"],
+    ["\n./dep.mjs", "ERR_MODULE_NOT_FOUND"],
+    ["\t./dep.mjs", "ERR_MODULE_NOT_FOUND"],
+    [".\n/dep.mjs", "ERR_INVALID_MODULE_SPECIFIER"],
+    ["./dep.mjs", null],
+    ["./dep.mjs ", null],
+    ["./de\np.mjs", null],
+    ["./de\tp.mjs", null],
+  ] as const;
+  const root = await createTestTempDirectory("rea-module-classification-");
+  await writeFile(join(root, "dep.mjs"), 'export default "loaded";');
+  await writeFile(
+    join(root, "main.mjs"),
+    cases
+      .map(
+        ([specifier], index) =>
+          `import value${index} from ${JSON.stringify(specifier)}; console.log(value${index});`,
+      )
+      .join("\n"),
+  );
+  const native = await promisify(execFile)(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `const results = [];
+for (const specifier of ${JSON.stringify(cases.map(([specifier]) => specifier))}) {
+  try { results.push({ specifier, value: (await import(specifier)).default }); }
+  catch (error) { results.push({ specifier, error: error.code }); }
+}
+console.log(JSON.stringify(results));`,
+    ],
+    { cwd: root, timeout: 5_000 },
+  );
+  expect(JSON.parse(native.stdout)).toEqual(
+    cases.map(([specifier, error]) =>
+      error === null ? { specifier, value: "loaded" } : { specifier, error },
+    ),
+  );
+
+  const graph = await relationshipGraph(root);
+  for (const [specifier, error] of cases) {
+    const imports = graph.edges.filter(
+      (edge) =>
+        edge.relation === "imports" && edge.properties.specifier === specifier,
+    );
+    expect(imports).toHaveLength(2);
+    expect(imports.map((edge) => edge.properties)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "static-import" }),
+        expect.objectContaining({ module_link_kind: "import" }),
+      ]),
+    );
+    for (const edge of imports) {
+      expect(edge.properties.resolved_path).toBe(
+        error === null ? "dep.mjs" : null,
+      );
+      if (error === null)
+        expect(edge.properties.resolution_status).toBe("resolved");
+      else expect(edge.properties.resolution_status).not.toBe("resolved");
+    }
+  }
+});
 
 it.each([
   ["getter-expansion", getterExpansionSource()],
