@@ -15,8 +15,11 @@ export interface NpmInstallation {
 /** Bun global installation that owns the running package and its entry point. */
 export interface BunInstallation {
   readonly manager: "bun";
-  /** Bun's global project directory, which owns `node_modules/rea-agents`. */
-  readonly globalDirectory: string;
+  /**
+   * Project that owns `node_modules/rea-agents`: Bun's global directory, or
+   * the nearest ancestor with a package.json when that directory has none.
+   */
+  readonly projectDirectory: string;
   readonly packageRoot: string;
 }
 
@@ -216,7 +219,7 @@ const runUpdateWorkflow = async (
       currentVersion,
       latestVersion: targetVersion,
       reason: "install",
-      remediation: `REA could not install ${targetVersion} in ${installation.manager === "npm" ? installation.prefix : installation.globalDirectory}: ${installed.error}. Repair this ${installation.manager} installation, then rerun rea update.`,
+      remediation: `REA could not install ${targetVersion} in ${installation.manager === "npm" ? installation.prefix : installation.projectDirectory}: ${installed.error}. Repair this ${installation.manager} installation, then rerun rea update.`,
     };
   const verified = await host.installedVersion(installation);
   if (!verified.ok || verified.value !== targetVersion)

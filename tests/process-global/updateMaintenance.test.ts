@@ -447,23 +447,44 @@ describe("update subprocess boundaries", () => {
 
 const createBunUpdateFixture = async (
   root: string,
-  bunVersion: string,
-  installOutputBytes: number,
-  installExitCode: number,
+  {
+    bunVersion,
+    installOutputBytes,
+    installExitCode,
+    project,
+  }: {
+    readonly bunVersion: string;
+    readonly installOutputBytes: number;
+    readonly installExitCode: number;
+    readonly project: "global" | "ancestor";
+  },
 ) => {
-  const globalDirectory = join(root, "bun", "install", "global");
+  const bunInstall = join(root, "home", ".bun");
+  const globalDirectory = join(bunInstall, "install", "global");
+  // Without a global manifest, Bun installs into the nearest ancestor project.
+  const projectDirectory =
+    project === "global" ? globalDirectory : join(root, "home");
   const packageRoot = join(
-    globalDirectory,
+    projectDirectory,
     "node_modules",
     PRODUCT_IDENTITY.packageName,
   );
   const versionPath = join(root, "installed-version");
   const logPath = join(root, "bun-invocations.jsonl");
+  await mkdir(globalDirectory, { recursive: true });
   await mkdir(join(packageRoot, "scripts"), { recursive: true });
   await writeFile(
-    join(globalDirectory, "package.json"),
+    join(projectDirectory, "package.json"),
     '{"dependencies":{"rea-agents":"3.2.1"}}\n',
   );
+  if (project === "ancestor") {
+    await writeFile(join(projectDirectory, "bun.lock"), "{}\n");
+    // Bun leaves a migrated npm lockfile in place; this one records nothing.
+    await writeFile(
+      join(projectDirectory, "package-lock.json"),
+      '{"lockfileVersion":3,"requires":true,"packages":{}}\n',
+    );
+  }
   await writeFile(versionPath, "3.2.1");
   await writeFile(
     join(packageRoot, "scripts", "rea.mjs"),
@@ -497,7 +518,15 @@ const createBunUpdateFixture = async (
       { mode: 0o755 },
     );
   }
-  return { globalDirectory, packageRoot, versionPath, logPath, binDirectory };
+  return {
+    bunInstall,
+    globalDirectory,
+    projectDirectory,
+    packageRoot,
+    versionPath,
+    logPath,
+    binDirectory,
+  };
 };
 
 describe("Bun global installation update", () => {
@@ -506,42 +535,45 @@ describe("Bun global installation update", () => {
     ["1.4.2", "install-failed", "absolute", UPDATE_COMMAND_OUTPUT_BYTES + 1, 2],
     ["1.2.17", "updated", "absolute", 0, 0],
     ["1.2.17", "updated", "relative", 0, 0],
+    ["1.2.17", "updated", "ancestor", 0, 0],
     ["1.2.14", "failed", "absolute", 0, 0],
     ["1.2.17-canary.1", "failed", "absolute", 0, 0],
     ["unknown", "failed", "absolute", 0, 0],
   ] as const)(
-    "handles Bun %s with outcome %s using %s global-directory configuration",
+    "handles Bun %s with outcome %s using %s global project",
     async (
       bunVersion,
       status,
-      directoryMode,
+      projectMode,
       installOutputBytes,
       installExitCode,
     ) => {
       // A recording `bun` on PATH crosses the real subprocess boundary without registry access.
       const root = await createTestTempDirectory("rea-update-bun-");
       const {
+        bunInstall,
         globalDirectory,
+        projectDirectory,
         packageRoot,
         versionPath,
         logPath,
         binDirectory,
-      } = await createBunUpdateFixture(
-        root,
+      } = await createBunUpdateFixture(root, {
         bunVersion,
         installOutputBytes,
         installExitCode,
-      );
+        project: projectMode === "ancestor" ? "ancestor" : "global",
+      });
       const pathKey =
         Object.keys(process.env).find((key) => key.toUpperCase() === "PATH") ??
         "PATH";
       const environment: NodeJS.ProcessEnv = {
         ...process.env,
         [pathKey]: `${binDirectory}${delimiter}${process.env[pathKey] ?? ""}`,
-        BUN_INSTALL: join(root, "bun"),
+        BUN_INSTALL: bunInstall,
       };
       delete environment.BUN_INSTALL_GLOBAL_DIR;
-      if (directoryMode === "relative")
+      if (projectMode === "relative")
         environment.BUN_INSTALL_GLOBAL_DIR = relative(root, globalDirectory);
 
       const callerDirectory = process.cwd();
@@ -563,8 +595,8 @@ describe("Bun global installation update", () => {
         .map((line): unknown => JSON.parse(line));
       const versionInvocation = {
         args: ["--version"],
-        cwd: globalDirectory,
-        globalDirectory,
+        cwd: projectDirectory,
+        globalDirectory: projectDirectory,
       };
       if (status === "failed") {
         expect(result).toEqual({
@@ -599,8 +631,9 @@ describe("Bun global installation update", () => {
             `${PRODUCT_IDENTITY.packageName}@3.3.0`,
           ],
         });
-      // `bun info` needs a project in its working directory, and the caller's
-      // directory must never be selected, so all commands run in the owner.
+      // `bun info` needs a project in its working directory, and neither the
+      // caller's directory nor a later ancestor search may select another
+      // project, so all commands run in the owner pinned as the global directory.
       expect(invocations).toEqual([
         versionInvocation,
         {
@@ -610,8 +643,8 @@ describe("Bun global installation update", () => {
             "dist-tags.latest",
             "--json",
           ],
-          cwd: globalDirectory,
-          globalDirectory,
+          cwd: projectDirectory,
+          globalDirectory: projectDirectory,
         },
         {
           args: [
@@ -620,8 +653,8 @@ describe("Bun global installation update", () => {
             "--ignore-scripts",
             `${PRODUCT_IDENTITY.packageName}@3.3.0`,
           ],
-          cwd: globalDirectory,
-          globalDirectory,
+          cwd: projectDirectory,
+          globalDirectory: projectDirectory,
         },
       ]);
     },

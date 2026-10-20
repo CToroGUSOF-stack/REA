@@ -1,4 +1,4 @@
-import { realpath, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { homeDirectoryFromEnvironment } from "../config/homeDirectory.js";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,6 +34,8 @@ export interface NpmInstallationHost {
 export interface BunInstallationHost {
   canonicalPath(path: string): Promise<string>;
   isFile(path: string): Promise<boolean>;
+  /** Text of the file, or undefined when the path does not exist. */
+  readText(path: string): Promise<string | undefined>;
 }
 
 /** Aggregate raw-byte retention policy for package-manager replies and diagnostics. */
@@ -187,7 +189,7 @@ const nonemptyEnvironment = (value: string | undefined): string | undefined =>
   value === undefined || value.length === 0 ? undefined : value;
 
 /**
- * Bun's global project directory for the selected environment, in Bun's precedence:
+ * Bun's configured global directory for the selected environment, in Bun's precedence:
  * BUN_INSTALL_GLOBAL_DIR, then $BUN_INSTALL/install/global, then
  * $XDG_CACHE_HOME/.bun/install/global, then ~/.bun/install/global.
  * Resolve against the caller's cwd before reusing the path as a subprocess cwd.
@@ -207,11 +209,106 @@ export const bunGlobalDirectory = (
   return resolve(cacheRoot, ".bun", "install", "global");
 };
 
+/** Lockfiles Bun writes into a project it installs packages into. */
+const BUN_LOCKFILES = ["bun.lock", "bun.lockb"] as const;
+
 /**
- * Identify the running package as Bun's global installation.
- * Bun walks up to an ancestor project when its global directory has no
- * package.json, so the global manifest must exist before `bun add --global`
- * can be trusted to update this package root.
+ * npm lockfiles, including the hidden lockfile npm keeps in node_modules.
+ * Bun migrates a project's npm lockfile and leaves it in place.
+ */
+const NPM_LOCKFILES = [
+  "npm-shrinkwrap.json",
+  "package-lock.json",
+  join("node_modules", ".package-lock.json"),
+] as const;
+
+/** Lockfiles of other package managers whose records REA does not parse. */
+const UNPARSED_LOCKFILES = ["yarn.lock", "pnpm-lock.yaml"] as const;
+
+/**
+ * Bun installs global packages into the nearest directory, starting at its
+ * global directory, that has a package.json. Without a global manifest that is
+ * an ancestor project, such as the home directory.
+ */
+const bunGlobalProject = async (
+  globalDirectory: string,
+  host: BunInstallationHost,
+): Promise<string | undefined> => {
+  let directory = globalDirectory;
+  while (!(await host.isFile(join(directory, "package.json")))) {
+    const parent = dirname(directory);
+    if (parent === directory) return undefined;
+    directory = parent;
+  }
+  return directory;
+};
+
+const hasBunLockfile = async (
+  directory: string,
+  host: BunInstallationHost,
+): Promise<boolean> => {
+  for (const lockfile of BUN_LOCKFILES)
+    if (await host.isFile(join(directory, lockfile))) return true;
+  return false;
+};
+
+/**
+ * Whether an ancestor project is Bun's alone for this package: Bun has a
+ * lockfile there and no other package manager's lockfile may record the
+ * package. Bun copies npm's records when it migrates a lockfile, so a Bun
+ * lockfile alone does not show that Bun installed the package.
+ */
+const bunOwnsAncestorProject = async (
+  directory: string,
+  host: BunInstallationHost,
+): Promise<boolean> => {
+  if (!(await hasBunLockfile(directory, host))) return false;
+  for (const lockfile of UNPARSED_LOCKFILES)
+    if (await host.isFile(join(directory, lockfile))) return false;
+  for (const lockfile of NPM_LOCKFILES) {
+    const text = await host.readText(join(directory, lockfile));
+    if (text !== undefined && npmLockfileMayRecordPackage(text)) return false;
+  }
+  return true;
+};
+
+/**
+ * Whether npm lockfile text may record the top-level package. Lockfile v2 and
+ * v3 key installed packages by path; v1 lists dependencies by name. Text that
+ * is not a lockfile object leaves the record unknown.
+ */
+const npmLockfileMayRecordPackage = (text: string): boolean => {
+  const decoded = safeParseJson(text);
+  const lockfile = decoded.ok ? decoded.value : undefined;
+  if (
+    typeof lockfile !== "object" ||
+    lockfile === null ||
+    Array.isArray(lockfile)
+  )
+    return true;
+  const name = PRODUCT_IDENTITY.packageName;
+  return (
+    [
+      ["packages", `node_modules/${name}`],
+      ["dependencies", name],
+    ] as const
+  ).some(([member, key]) => {
+    const section: unknown = Reflect.get(lockfile, member);
+    return (
+      section !== undefined &&
+      (typeof section !== "object" ||
+        section === null ||
+        Array.isArray(section) ||
+        Object.hasOwn(section, key))
+    );
+  });
+};
+
+/**
+ * Identify the running package as Bun's global installation: the project Bun
+ * installs global packages into must own this package root. An ancestor
+ * project must also be Bun's alone for this package, so Bun never updates a
+ * package that another package manager installed.
  */
 export const detectBunInstallation = async (
   packageRoot: string,
@@ -219,20 +316,24 @@ export const detectBunInstallation = async (
   host: BunInstallationHost,
 ): Promise<BunInstallation | undefined> => {
   try {
-    const canonicalPackageRoot = await host.canonicalPath(packageRoot);
-    const globalPackageRoot = await host.canonicalPath(
-      join(globalDirectory, "node_modules", PRODUCT_IDENTITY.packageName),
-    );
+    const projectDirectory = await bunGlobalProject(globalDirectory, host);
     if (
-      canonicalPackageRoot !== globalPackageRoot ||
-      !(await host.isFile(join(globalDirectory, "package.json")))
+      projectDirectory === undefined ||
+      (projectDirectory !== globalDirectory &&
+        !(await bunOwnsAncestorProject(projectDirectory, host)))
     )
       return undefined;
-    return {
-      manager: "bun",
-      globalDirectory,
-      packageRoot: canonicalPackageRoot,
-    };
+    const canonicalPackageRoot = await host.canonicalPath(packageRoot);
+    const projectPackageRoot = await host.canonicalPath(
+      join(projectDirectory, "node_modules", PRODUCT_IDENTITY.packageName),
+    );
+    return canonicalPackageRoot === projectPackageRoot
+      ? {
+          manager: "bun",
+          projectDirectory,
+          packageRoot: canonicalPackageRoot,
+        }
+      : undefined;
   } catch (cause: unknown) {
     // best-effort cleanup: optional install-location probing; unknown means not Bun-managed.
     void cause;
@@ -303,21 +404,33 @@ export const npmReleaseLookup = (
     : err({ kind: "invalid-metadata", detail: parsed.error });
 };
 
+/** A missing path is absent; any other failure leaves Bun ownership unknown. */
 const isFile = async (path: string): Promise<boolean> => {
   try {
     return (await stat(path)).isFile();
   } catch (cause: unknown) {
-    // best-effort cleanup: a missing or unreadable manifest is not an owned Bun global project.
-    void cause;
-    return false;
+    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT")
+      return false;
+    throw cause;
+  }
+};
+
+const readText = async (path: string): Promise<string | undefined> => {
+  try {
+    return await readFile(path, "utf8");
+  } catch (cause: unknown) {
+    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT")
+      return undefined;
+    throw cause;
   }
 };
 
 /**
  * Environment and working directory for package-manager subprocesses.
- * Bun commands run inside the identified global project with that directory
- * pinned, so the caller's current project and Bun's ancestor search are never
- * selected. npm keeps the caller's working directory; its prefix is explicit.
+ * Bun commands run inside the identified project, which is also pinned as
+ * Bun's global directory, so neither the caller's current project nor another
+ * ancestor search can select a different project. npm keeps the caller's
+ * working directory; its prefix is explicit.
  */
 const packageManagerContext = (
   installation: UpdateInstallation | undefined,
@@ -330,9 +443,9 @@ const packageManagerContext = (
     ? {
         environment: {
           ...environment,
-          BUN_INSTALL_GLOBAL_DIR: installation.globalDirectory,
+          BUN_INSTALL_GLOBAL_DIR: installation.projectDirectory,
         },
-        workingDirectory: installation.globalDirectory,
+        workingDirectory: installation.projectDirectory,
       }
     : { environment, workingDirectory: undefined };
 
@@ -348,7 +461,7 @@ export const systemUpdateHost = (
       (await detectBunInstallation(
         packageRoot,
         bunGlobalDirectory(environment, process.platform),
-        { canonicalPath: realpath, isFile },
+        { canonicalPath: realpath, isFile, readText },
       )) ??
       detectNpmInstallation(packageRoot, {
         canonicalPath: realpath,

@@ -394,7 +394,7 @@ REA's managed shared and Claude Code personal skill locations. See the
 ### Update the owning installation
 
 `rea update` installs the exact resolved
-release into the npm prefix or Bun global directory that owns the running
+release into the npm prefix or Bun global project that owns the running
 package, then checks the new executable's version before reporting success. It
 does not reopen onboarding. For npm installations, release lookup and
 installation both use npm's configured registry. Bun global updates require
@@ -403,12 +403,19 @@ first and stops with an instruction to upgrade Bun manually if the version is
 older or cannot be parsed; it does not upgrade Bun itself.
 For supported Bun global installations, `bun info` and
 `bun add --global --ignore-scripts` use Bun's configured registry
-and run inside the owning Bun global directory (`BUN_INSTALL_GLOBAL_DIR`, else
-`$BUN_INSTALL/install/global`, else `$XDG_CACHE_HOME/.bun/install/global`,
-else `~/.bun/install/global`), never in the caller's current project. A Bun
-global directory without its `package.json` is not treated as an owned
-installation, because Bun would install into the nearest ancestor project
-instead.
+and run inside the owning Bun global project, never in the caller's current
+project. Like Bun, the updater starts at the Bun global directory
+(`BUN_INSTALL_GLOBAL_DIR`, else `$BUN_INSTALL/install/global`, else
+`$XDG_CACHE_HOME/.bun/install/global`, else `~/.bun/install/global`) and uses
+the nearest directory with a `package.json`. When the global directory has
+none, that is an ancestor such as the home directory; the updater accepts it
+only when it also has a Bun lockfile (`bun.lock` or `bun.lockb`) and no other
+package manager may have installed REA there: an npm lockfile left by Bun's
+migration (`package-lock.json`, `npm-shrinkwrap.json`, or
+`node_modules/.package-lock.json`) must not record `rea-agents`, and the
+project must have no `yarn.lock` or `pnpm-lock.yaml`. The running
+package must be that project's `node_modules/rea-agents`, and Bun commands run
+with the project pinned as `BUN_INSTALL_GLOBAL_DIR`.
 Its maintenance plan selects only existing REA registrations and an already
 installed REA skill. Run the returned scoped setup command to review and approve
 those changes, then restart affected agents. The plan is returned in terminal,
