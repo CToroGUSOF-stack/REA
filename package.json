@@ -48,6 +48,7 @@
   "packageManager": "npm@11.16.0",
   "files": [
     "dist",
+    "desktop-app",
     "install.sh",
     "bridge/hopper_bridge.py",
     "bridge/cutter/rea_bridge.py",
@@ -99,6 +100,9 @@
     "licenses"
   ],
   "scripts": {
+    "desktop": "electron desktop-app/main.cjs",
+    "desktop:preview": "electron desktop-app/main.cjs",
+    "desktop:build": "electron-builder --win nsis",
     "release:notes": "node scripts/release-notes.mjs",
     "deps:check": "node scripts/check-dependency-install.mjs",
     "metadata:generate": "node scripts/run-exclusive.mjs artifacts node scripts/generate-package-metadata.mjs",
@@ -372,6 +376,8 @@
     }
   },
   "devDependencies": {
+    "electron": "39.0.0",
+    "electron-builder": "26.0.12",
     "@fast-check/vitest": "0.5.0",
     "@stryker-mutator/core": "10.0.0",
     "@stryker-mutator/typescript-checker": "10.0.0",
@@ -402,5 +408,40 @@
   },
   "allowScripts": {
     "frida@17.23.2": true
+  },
+  "build": {
+    "appId": "io.github.morluto.rea",
+    "productName": "REA",
+    "artifactName": "REA-Setup-${version}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "desktop-app/**/*",
+      "scripts/rea.mjs",
+      "dist/**/*",
+      "bridge/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "desktop-app/main.cjs"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "REA"
+    }
   }
 }

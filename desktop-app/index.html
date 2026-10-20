@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#09111f" />
+    <!--
+    THESIS: REA is an investigation desk, not a generic dashboard; it turns a local target into a visible, evidence-first next step.
+    OWN-WORLD: Midnight blue workspace, copper signal accents, thin technical rules, and soft luminous focus states.
+    STORY: Choose a target, confirm the available analysis path, then keep the investigation's evidence and unknowns together.
+    FIRST VIEWPORT: Persistent rail at left; a focused target drop zone, active investigation status, and provider readiness occupy the first screen.
+    FORM: Operate surface using a split desk layout instead of equal metric cards; composition seed not applicable to this focused app shell.
+    -->
+    <title>REA — Reverse Engineer Anything</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Primary navigation">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div>
+            <strong>REA</strong>
+            <small>reverse engineer anything</small>
+          </div>
+        </div>
+
+        <div class="workspace-switcher">
+          <span class="status-dot"></span>
+          <div>
+            <span class="eyebrow">WORKSPACE</span>
+            <strong>Local / Windows</strong>
+          </div>
+          <button class="icon-button" aria-label="Workspace options">•••</button>
+        </div>
+
+        <nav class="nav-list">
+          <button class="nav-item active" data-view="overview"><span class="nav-icon">⌂</span>Overview</button>
+          <button class="nav-item" data-view="investigations"><span class="nav-icon">◈</span>Investigations <span class="nav-count">3</span></button>
+          <button class="nav-item" data-view="providers"><span class="nav-icon">◌</span>Providers</button>
+          <button class="nav-item" data-view="evidence"><span class="nav-icon">▤</span>Evidence</button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <button class="nav-item" data-view="settings"><span class="nav-icon">⚙</span>Settings</button>
+          <button class="help-link" id="docs-button"><span>?</span>Read the field guide <b>↗</b></button>
+          <div class="version">REA 6.7.0 <span>•</span> Desktop preview</div>
+        </div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div class="breadcrumbs"><span>Workspace</span><b>/</b><strong id="breadcrumb-view">Overview</strong></div>
+          <div class="topbar-actions">
+            <span class="sync-state"><i></i> All local</span>
+            <button class="avatar" aria-label="User profile">D</button>
+          </div>
+        </header>
+
+        <div id="view-overview" class="view active-view">
+          <section class="page-intro">
+            <div>
+              <p class="kicker">MONDAY, 19 OCTOBER 2026 <span>•</span> READY TO INVESTIGATE</p>
+              <h1>Your investigation desk.</h1>
+              <p class="intro-copy">Start with a target. REA will keep the path, provider, and evidence in view while you work.</p>
+            </div>
+            <button class="button secondary" id="refresh-button"><span>↻</span> Refresh readiness</button>
+          </section>
+
+          <section class="hero-grid">
+            <div class="target-panel panel">
+              <div class="panel-heading">
+                <div>
+                  <span class="section-label">01 / TARGET</span>
+                  <h2>What are you looking at?</h2>
+                </div>
+                <span class="quiet-badge">LOCAL ONLY</span>
+              </div>
+              <button class="drop-zone" id="choose-target">
+                <span class="drop-icon">+</span>
+                <span class="drop-title">Choose a file or folder</span>
+                <span class="drop-subtitle">EXE · DLL · ASAR · APK · WEB BUNDLE · DIRECTORY</span>
+                <span class="drop-hint">or drop it anywhere in this window</span>
+              </button>
+              <div class="selected-target" id="selected-target" hidden>
+                <div class="file-symbol">⌁</div>
+                <div class="target-meta">
+                  <span class="section-label">SELECTED TARGET</span>
+                  <strong id="target-name">No target selected</strong>
+                  <span id="target-path">Choose a file or folder to begin</span>
+                </div>
+                <button class="text-button" id="clear-target">Clear</button>
+              </div>
+              <div class="target-actions">
+                <button class="button primary" id="start-investigation" disabled>Run reversal <span>→</span></button>
+                <button class="button ghost" id="paste-target">Paste path</button>
+              </div>
+              <div class="workflow-status" id="workflow-status" hidden>
+                <div class="workflow-spinner" aria-hidden="true"></div>
+                <div>
+                  <strong id="workflow-title">Investigation ready</strong>
+                  <small id="workflow-message">REA will preserve evidence and unknowns.</small>
+                </div>
+              </div>
+              <div class="rebuild-offer" id="rebuild-offer" hidden>
+                <div>
+                  <span class="section-label">REVERSAL COMPLETE</span>
+                  <strong>Build an independent open-source rebuild?</strong>
+                  <small>Creates a separate workspace from the evidence report. It does not copy source code or assets.</small>
+                </div>
+                <button class="button primary" id="create-rebuild">Create rebuild <span>↗</span></button>
+              </div>
+            </div>
+
+            <div class="readiness-panel panel">
+              <div class="panel-heading">
+                <div>
+                  <span class="section-label">02 / READINESS</span>
+                  <h2>Available paths</h2>
+                </div>
+                <span class="live-indicator"><i></i> LIVE</span>
+              </div>
+              <div class="provider-list">
+                <div class="provider-row"><span class="provider-mark cyan">JS</span><div><strong>JavaScript / Electron</strong><small>Static analysis ready</small></div><span class="ready-tag">READY</span></div>
+                <div class="provider-row"><span class="provider-mark copper">GH</span><div><strong>Ghidra</strong><small id="ghidra-readiness">Checking D:\Ghirdra\ghirdra\ghidraRun.bat</small></div><span class="pending-tag" id="ghidra-status">CHECKING</span></div>
+                <div class="provider-row"><span class="provider-mark violet">ID</span><div><strong>IDA Pro</strong><small>Bring your own provider</small></div><span class="muted-tag">UNKNOWN</span></div>
+                <div class="provider-row"><span class="provider-mark green">WEB</span><div><strong>Browser observation</strong><small>Chrome-family browser detected</small></div><span class="ready-tag">READY</span></div>
+              </div>
+              <button class="inline-link" data-view="providers">Manage providers <span>→</span></button>
+            </div>
+          </section>
+
+          <section class="lower-grid">
+            <div class="recent-section">
+              <div class="section-heading"><div><span class="section-label">RECENT WORK</span><h2>Continue where you left off.</h2></div><button class="text-button" data-view="investigations">View all <span>→</span></button></div>
+              <div class="recent-list">
+                <button class="recent-row"><span class="recent-type exe">EXE</span><span class="recent-info"><strong>sample-client.exe</strong><small>Native inventory · 14 min ago</small></span><span class="recent-state complete">COMPLETE</span><span class="row-arrow">→</span></button>
+                <button class="recent-row"><span class="recent-type asar">ASAR</span><span class="recent-info"><strong>desktop-shell.asar</strong><small>Electron surface · Yesterday</small></span><span class="recent-state active">ACTIVE</span><span class="row-arrow">→</span></button>
+                <button class="recent-row"><span class="recent-type apk">APK</span><span class="recent-info"><strong>field-notes.apk</strong><small>Android manifest · 3 days ago</small></span><span class="recent-state paused">PAUSED</span><span class="row-arrow">→</span></button>
+              </div>
+            </div>
+            <aside class="signal-card">
+              <div class="signal-orbit"><span></span><span></span><span></span><b>∿</b></div>
+              <span class="section-label">EVIDENCE SIGNAL</span>
+              <h3>Keep the unknowns close.</h3>
+              <p>Every result carries its source, confidence, and what REA could not establish.</p>
+              <button class="inline-link" data-view="evidence">Explore evidence <span>→</span></button>
+            </aside>
+          </section>
+        </div>
+
+        <div id="view-investigations" class="view">
+          <section class="page-intro compact"><div><p class="kicker">WORKSPACE / INVESTIGATIONS</p><h1>Investigation history.</h1><p class="intro-copy">Choose a target, run a bounded evidence workflow, then create a clean-room rebuild workspace.</p></div><button class="button primary" data-view="overview">New investigation <span>+</span></button></section>
+          <div class="full-panel panel"><div class="table-header"><span>Target</span><span>Type</span><span>Last activity</span><span>Status</span><span></span></div><div class="table-row"><strong>sample-client.exe</strong><span>Native binary</span><span>14 min ago</span><span class="recent-state complete">COMPLETE</span><span>→</span></div><div class="table-row"><strong>desktop-shell.asar</strong><span>Electron app</span><span>Yesterday</span><span class="recent-state active">ACTIVE</span><span>→</span></div><div class="table-row"><strong>field-notes.apk</strong><span>Android package</span><span>3 days ago</span><span class="recent-state paused">PAUSED</span><span>→</span></div></div>
+        </div>
+
+        <div id="view-providers" class="view"><section class="page-intro compact"><div><p class="kicker">WORKSPACE / PROVIDERS</p><h1>Provider readiness.</h1><p class="intro-copy">Understand what is available before an investigation begins.</p></div></section><div class="provider-detail-grid"><div class="provider-detail panel"><span class="provider-mark cyan">JS</span><h2>JavaScript / Electron</h2><p>Static module, source map, IPC, and bundle analysis through the local Node runtime.</p><div class="detail-footer"><span class="ready-tag">READY</span><span>Node {system}</span></div></div><div class="provider-detail panel"><span class="provider-mark copper">GH</span><h2>Ghidra</h2><p>Deep native analysis with an ephemeral project database. No executable bytes are modified.</p><div class="detail-footer"><span class="pending-tag" id="ghidra-detail-status">CHECKING</span><span class="provider-path" id="ghidra-path">D:\ghirdra\ghirdra\ghidraRun.bat</span></div></div><div class="provider-detail panel"><span class="provider-mark green">WEB</span><h2>Browser observation</h2><p>Capture page structure, scripts, network observations, and requested screenshots.</p><div class="detail-footer"><span class="ready-tag">READY</span><span>Chrome family</span></div></div></div></div>
+
+        <div id="view-evidence" class="view"><section class="page-intro compact"><div><p class="kicker">WORKSPACE / EVIDENCE</p><h1>Evidence ledger.</h1><p class="intro-copy">Source, interpretation, and unknowns stay separate by design.</p></div></section><div class="evidence-layout"><div class="full-panel panel evidence-list"><div class="evidence-item"><span class="evidence-dot verified"></span><div><strong>Manifest declares a bundled Chromium runtime</strong><small>desktop-shell.asar · static parser · 2 min ago</small></div><span class="confidence">0.98</span></div><div class="evidence-item"><span class="evidence-dot derived"></span><div><strong>IPC surface likely owns clipboard routing</strong><small>desktop-shell.asar · graph projection · 2 min ago</small></div><span class="confidence">0.76</span></div><div class="evidence-item"><span class="evidence-dot unknown"></span><div><strong>Native module load path is unresolved</strong><small>desktop-shell.asar · boundary check · 2 min ago</small></div><span class="confidence">—</span></div></div><aside class="legend panel"><span class="section-label">LEGEND</span><div><i class="verified"></i>Observed</div><div><i class="derived"></i>Derived</div><div><i class="unknown"></i>Unknown</div></aside></div></div>
+
+        <div id="view-settings" class="view"><section class="page-intro compact"><div><p class="kicker">WORKSPACE / SETTINGS</p><h1>Desktop settings.</h1><p class="intro-copy">Local preferences for your REA workspace.</p></div></section><div class="settings-panel panel"><div class="setting-row"><div><strong>Reduce motion</strong><small>Prefer instant transitions and fewer animated surfaces.</small></div><label class="switch"><input type="checkbox" /><span></span></label></div><div class="setting-row"><div><strong>Open developer tools on launch</strong><small>Useful for previewing the desktop shell during development.</small></div><label class="switch"><input type="checkbox" checked /><span></span></label></div><div class="setting-row"><div><strong>Workspace location</strong><small>Local / Windows · evidence is never uploaded by this shell.</small></div><span class="setting-value">LOCAL ONLY</span></div></div></div>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status"></div>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

@@ -121,6 +121,30 @@ For native analysis, configure a provider first. See the
 [CLI and Evidence guide](docs/cli.md) for native commands, provider selection,
 snapshots and scripting.
 
+### Open the Windows desktop preview
+
+The repository includes a Windows-first Electron shell for choosing local
+targets, checking provider readiness, and keeping investigation state visible.
+After installing dependencies, run:
+
+```bash
+npm run desktop
+```
+
+The shell is local-only and does not replace the CLI or MCP contracts. It is a
+focused workspace for the next investigation step; provider setup and analysis
+semantics remain owned by REA's existing workflows.
+
+The desktop shell uses `D:\Ghirdra\ghirdra\ghidraRun.bat` as its Windows Ghidra
+launcher target, passes its containing directory to REA as `GHIDRA_INSTALL_DIR`,
+and reports whether the launcher is present on the machine.
+
+The desktop workflow now runs a bounded local reversal for the selected target,
+shows its evidence status, and can create a separate clean-room open-source
+rebuild workspace. The generated rebuild contains the investigation report and
+independent implementation scaffold; it does not copy target source code,
+assets, or identifiers.
+
 ### Update REA
 
 REA changes quickly, and new releases include frequent bug fixes. Keep your
