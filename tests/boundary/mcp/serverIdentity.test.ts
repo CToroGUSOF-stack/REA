@@ -196,7 +196,7 @@ describe("server and catalog identity", () => {
     expect(unknown.server.command_path).toBeNull();
     const aligned = createServerIdentity({
       startedAt: "2026-07-13T00:00:00.000Z",
-      commandPath: "/packaged/rea.mjs",
+      commandPath: normalizeEntrypointPath("/packaged/rea.mjs"),
       expected: {
         package_version: PRODUCT_IDENTITY.packageVersion,
         catalog_digest: CATALOG_IDENTITY.digests.combined_sha256,
@@ -206,7 +206,7 @@ describe("server and catalog identity", () => {
     expect(aligned.alignment).toMatchObject({ state: "aligned", reasons: [] });
     const stale = createServerIdentity({
       startedAt: "2026-07-13T00:00:00.000Z",
-      commandPath: "/packaged/rea.mjs",
+      commandPath: normalizeEntrypointPath("/packaged/rea.mjs"),
       expected: {
         package_version: "1.2.0",
         catalog_digest: "0".repeat(64),
@@ -215,6 +215,18 @@ describe("server and catalog identity", () => {
     expect(stale.alignment).toMatchObject({
       state: "mcp_server_restart_required",
       reasons: ["package_version_mismatch", "catalog_digest_mismatch"],
+    });
+  });
+
+  it("distinguishes different native entrypoint paths from an aligned registration", () => {
+    const identity = createServerIdentity({
+      startedAt: "2026-07-13T00:00:00.000Z",
+      commandPath: normalizeEntrypointPath("/packaged/rea.mjs"),
+      expected: { server_path: "/registered/rea.mjs" },
+    });
+    expect(identity.alignment).toMatchObject({
+      state: "mcp_server_restart_required",
+      reasons: ["registration_path_mismatch"],
     });
   });
 
