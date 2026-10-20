@@ -87,9 +87,16 @@ const statementPosition = (
   parents: WeakMap<t.Node, t.Node>,
   declarator?: t.VariableDeclarator,
 ): StatementPosition | null => {
-  const parent = parents.get(statement);
+  const owner = parents.get(statement);
+  const enclosing =
+    (t.isExportNamedDeclaration(owner) ||
+      t.isExportDefaultDeclaration(owner)) &&
+    owner.declaration === statement
+      ? owner
+      : statement;
+  const parent = parents.get(enclosing);
   if (!t.isProgram(parent) && !t.isBlockStatement(parent)) return null;
-  const index = parent.body.indexOf(statement);
+  const index = parent.body.indexOf(enclosing);
   return index < 0
     ? null
     : {
@@ -379,14 +386,7 @@ const computeDirectInitializerPosition = (
   parents: WeakMap<t.Node, t.Node>,
 ): StatementPosition | null => {
   if (t.isClassDeclaration(node) && node.id !== null) {
-    const parent = parents.get(node);
-    const statement =
-      (t.isExportNamedDeclaration(parent) ||
-        t.isExportDefaultDeclaration(parent)) &&
-      parent.declaration === node
-        ? parent
-        : node;
-    return statementPosition(statement, parents);
+    return statementPosition(node, parents);
   }
   if (
     (t.isAssignmentExpression(node) &&

@@ -90,6 +90,23 @@ const replySchema = z.discriminatedUnion("ok", [
 type Launcher = NonNullable<Parameters<typeof runOwnedCommand>[2]>["launcher"];
 type EvmOutcome = Result<EvmInterfaceExecution, AnalysisError>;
 type EvmRuntimeRoot = Pick<PrivateRuntimeRoot, "path" | "close">;
+
+const observeCompletedEvmCancellation = (
+  input: InspectEvmInterfaceInput,
+  result: EvmOutcome,
+  signal: AbortSignal | undefined,
+  output: AnalysisCapturedOutput | undefined,
+): EvmOutcome => {
+  if (!result.ok || signal?.aborted !== true) return result;
+  return err(
+    new AnalysisCancelledError(OPERATION, {
+      cause: signal.reason,
+      partialObservation: evmInterfaceEvidence(input, result.value),
+      ...(output === undefined ? {} : { capturedOutput: output }),
+    }),
+  );
+};
+
 type PendingEvmCleanup = {
   readonly input: InspectEvmInterfaceInput;
   readonly result: EvmOutcome;
@@ -737,18 +754,12 @@ export class EvmoleInterfaceProvider implements EvmInterfacePort {
       } catch (cause: unknown) {
         const retainedRoot = root;
         const lease = rootLeaseFor(retainedRoot);
-        const cleanupResult =
-          result.ok && options?.signal?.aborted
-            ? err(
-                new AnalysisCancelledError(OPERATION, {
-                  cause: options.signal.reason,
-                  partialObservation: evmInterfaceEvidence(input, result.value),
-                  ...(retainedOutput === undefined
-                    ? {}
-                    : { capturedOutput: retainedOutput }),
-                }),
-              )
-            : result;
+        const cleanupResult = observeCompletedEvmCancellation(
+          input,
+          result,
+          options?.signal,
+          retainedOutput,
+        );
         this.#pendingCleanup = {
           input,
           result: cleanupResult,
@@ -773,7 +784,12 @@ export class EvmoleInterfaceProvider implements EvmInterfacePort {
         return err(failure);
       }
     }
-    return result;
+    return observeCompletedEvmCancellation(
+      input,
+      result,
+      options?.signal,
+      retainedOutput,
+    );
   }
 
   async close(): Promise<void> {
