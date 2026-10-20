@@ -181,7 +181,8 @@ class ReaJadxBridge {
             return new MethodSnapshot(name, rawName, shortId, List.copyOf(bodyAbsenceMarkers), Map.of(
                 "name", name, "signature", signature,
                 "dex_descriptor", descriptor,
-                "is_constructor", method.isConstructor(), "def_pos", 0));
+                "is_constructor", method.isConstructor(),
+                "access_flags", Integer.toUnsignedLong(method.getAccessFlags().rawValue()), "def_pos", 0));
           }).toList();
           List<Map<String, Object>> fields = node.getFields().stream()
               .sorted(Comparator.comparing(FieldNode::getAlias))

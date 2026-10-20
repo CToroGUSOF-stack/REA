@@ -7,6 +7,7 @@ import {
 } from "../domain/analysisErrorCore.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import {
+  decodeJadxMethodAccessFlags,
   jadxAppSchema,
   jadxClassPageSchema,
   jadxClassSchema,
@@ -43,6 +44,8 @@ const methodsOf = (summary: ClassSummary) => {
       reported_signature: method.signature,
       overload_index: index,
       is_constructor: method.is_constructor,
+      access_flags: method.access_flags,
+      access_flag_names: decodeJadxMethodAccessFlags(method.access_flags),
       dex_descriptor: method.dex_descriptor,
     };
   });
@@ -228,6 +231,32 @@ const inspectMethod = async (
       "overload_index",
       `Index ${index} is outside the ${candidates.length} matching overloads.`,
     );
+  const isNative = selected.access_flag_names.includes("native");
+  const isAbstract = selected.access_flag_names.includes("abstract");
+  const absentBodyReason =
+    isNative && isAbstract
+      ? "conflicting_access_flags"
+      : isNative
+        ? "native"
+        : isAbstract
+          ? "abstract"
+          : null;
+  if (absentBodyReason !== null)
+    return androidResultSchemas.inspect_android_method.parse({
+      engine,
+      class_name: summary.full_name,
+      method: selected,
+      overload_count: candidates.length,
+      representation: null,
+      body_status: "not_available",
+      body_unavailable_reason: absentBodyReason,
+      fell_back: false,
+      markers: [
+        ...(isNative ? ["native_method"] : []),
+        ...(isAbstract ? ["abstract_method"] : []),
+      ],
+      source: normalizeJadxText(""),
+    });
   const body = jadxMethodSchema.parse(
     await tools.json("get_method_body", {
       class_name: summary.full_name,
@@ -247,13 +276,18 @@ const inspectMethod = async (
       request.operation,
       "JADX returned a different method or overload inventory",
     );
+  const bodyUnavailable =
+    body.body.length === 0 ||
+    body.body ===
+      "// method exists but has no decompiled body (native/abstract)";
   return androidResultSchemas.inspect_android_method.parse({
     engine,
     class_name: summary.full_name,
     method: selected,
     overload_count: candidates.length,
-    representation: body.mode,
-    body_status: body.body.length === 0 ? "not_available" : "available",
+    representation: bodyUnavailable ? null : body.mode,
+    body_status: bodyUnavailable ? "not_available" : "available",
+    body_unavailable_reason: bodyUnavailable ? "no_decompiled_body" : null,
     fell_back: body.fell_back,
     markers: body.markers,
     source: normalizeJadxText(body.body),

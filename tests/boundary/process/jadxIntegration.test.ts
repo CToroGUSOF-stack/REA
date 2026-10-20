@@ -395,7 +395,8 @@ it("completes large class inventories with exact case-sensitive search semantics
 it("close cancels active and queued work and prevents later acquisition", async () => {
   const { service, apk, launches, provider } = await setup("stall");
   const active = service.execute("inspect_android_package", { path: apk });
-  await expect.poll(() => launches.length).toBe(1);
+  // Readiness probes Java and process ownership before launching the engine.
+  await expect.poll(() => launches.length, { timeout: 10_000 }).toBe(1);
   const queued = service.execute("inspect_android_package", { path: apk });
   await provider.close();
   for (const result of [
@@ -653,7 +654,8 @@ it("cancels active and queued requests, cleans ownership and never launches a qu
     { path: apk },
     { signal: activeController.signal },
   );
-  await expect.poll(() => launches.length).toBe(1);
+  // Readiness probes Java and process ownership before launching the engine.
+  await expect.poll(() => launches.length, { timeout: 10_000 }).toBe(1);
   const queuedController = new AbortController();
   const queued = service.execute(
     "inspect_android_package",

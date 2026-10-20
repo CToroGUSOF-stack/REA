@@ -109,3 +109,32 @@ it("rejects invalid APK selectors and accepts an explicit zero overload without 
     }).success,
   ).toBe(true);
 });
+
+it.each([undefined, -1, 0.5, 0x100000000])(
+  "rejects invalid method access flags %s",
+  async (flags) => {
+    const { jadxClassSchema } =
+      await import("../../../src/android/JadxProtocol.js");
+    expect(
+      jadxClassSchema.safeParse({
+        full_name: "fixture.Target",
+        name: "Target",
+        method_count: 1,
+        field_count: 0,
+        inner_class_count: 0,
+        inner_classes: [],
+        fields: [],
+        methods: [
+          {
+            name: "run",
+            signature: "run(): void",
+            dex_descriptor: "()V",
+            is_constructor: false,
+            access_flags: flags,
+            def_pos: 0,
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  },
+);

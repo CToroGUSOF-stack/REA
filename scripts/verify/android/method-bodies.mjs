@@ -39,7 +39,8 @@ const cases = [
     overload_index: 0,
     overload_count,
     body_status: "not_available",
-    representation: "java",
+    representation: null,
+    body_unavailable_reason: marker === "native_method" ? "native" : "abstract",
     fell_back: false,
     markers: [marker],
     witnesses: [],
@@ -109,6 +110,10 @@ export const verifyAndroidMethodBodies = async ({
     assert.equal(result.overload_count, scenario.overload_count);
     assert.equal(result.body_status, scenario.body_status);
     assert.equal(result.representation, scenario.representation);
+    assert.equal(
+      result.body_unavailable_reason,
+      scenario.body_unavailable_reason ?? null,
+    );
     assert.equal(result.fell_back, scenario.fell_back);
     assert.deepEqual(result.markers, scenario.markers);
     if (scenario.body_status === "not_available")
@@ -121,6 +126,78 @@ export const verifyAndroidMethodBodies = async ({
       );
     return evidence;
   };
+  const flagCases = [
+    {
+      operation: "inspect_android_class",
+      args: [],
+      input: {},
+      check: (result) => {
+        const methods = new Map(
+          result.methods.map((method) => [method.name, method]),
+        );
+        assert.equal(methods.get("nativeCall").access_flags, 0x101);
+        assert.deepEqual(methods.get("nativeCall").access_flag_names, [
+          "public",
+          "native",
+        ]);
+        assert.equal(methods.get("missing").access_flags, 0x401);
+        assert.deepEqual(methods.get("missing").access_flag_names, [
+          "public",
+          "abstract",
+        ]);
+        assert.equal(methods.get("generated").access_flags, 0x1049);
+        assert.deepEqual(methods.get("generated").access_flag_names, [
+          "public",
+          "static",
+          "bridge",
+          "synthetic",
+        ]);
+      },
+    },
+    ...[
+      ["nativeCall", "native"],
+      ["missing", "abstract"],
+      ["generated", null],
+    ].map(([method, reason]) => ({
+      operation: "inspect_android_method",
+      args: [method],
+      input: { method_name: method },
+      check: (result) => {
+        assert.equal(result.body_unavailable_reason, reason);
+        assert.equal(
+          result.body_status,
+          reason === null ? "available" : "not_available",
+        );
+        assert.equal(result.representation, reason === null ? "java" : null);
+        if (reason !== null) assert.equal(result.source.text, "");
+      },
+    })),
+  ];
+  const flagEvidence = [];
+  for (const scenario of flagCases) {
+    const response = await execute(
+      process.execPath,
+      [
+        entrypoint,
+        scenario.operation.replaceAll("_", "-"),
+        apk,
+        "fixture.AccessFlags",
+        ...scenario.args,
+        "--format",
+        "json",
+      ],
+      {
+        cwd: repository,
+        env: environment,
+        timeout: 150_000,
+        maxBuffer: 8 * 1024 * 1024,
+      },
+    );
+    const evidence = parseEvidence(JSON.parse(response.stdout));
+    assert.equal(evidence.subject.digest.sha256, digest);
+    scenario.check(evidence.normalized_result);
+    flagEvidence.push(evidence);
+  }
   const cli = new Map();
   for (const scenario of cases) {
     const response = await execute(
@@ -162,6 +239,26 @@ export const verifyAndroidMethodBodies = async ({
   });
   try {
     await client.connect(transport, { timeout: 30_000 });
+    for (const [index, scenario] of flagCases.entries()) {
+      const response = await client.callTool(
+        {
+          name: scenario.operation,
+          arguments: {
+            path: apk,
+            class_name: "fixture.AccessFlags",
+            ...scenario.input,
+          },
+        },
+        { timeout: 150_000 },
+      );
+      assert.notEqual(response.isError, true, JSON.stringify(response));
+      const evidence = parseEvidence(response.structuredContent);
+      scenario.check(evidence.normalized_result);
+      assert.deepEqual(
+        evidence.normalized_result,
+        flagEvidence[index].normalized_result,
+      );
+    }
     for (const scenario of cases) {
       const response = await client.callTool(
         {

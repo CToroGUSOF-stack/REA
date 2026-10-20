@@ -2,7 +2,11 @@ import { z } from "zod";
 import { AnalysisOutputError } from "../domain/analysisErrorCore.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
 import type { AndroidOperation } from "../domain/android/androidAnalysis.js";
-import { dexDescriptorSchema } from "../domain/android/androidAnalysis.js";
+import {
+  androidMethodAccessFlagsSchema,
+  androidMethodAccessFlagNameSchema,
+  dexDescriptorSchema,
+} from "../domain/android/androidAnalysis.js";
 
 const count = z.number().int().nonnegative();
 /** Typed allocation failures authored before upstream erases the JVM exception. */
@@ -81,6 +85,7 @@ export const jadxClassSchema = z.object({
       signature: z.string(),
       dex_descriptor: dexDescriptorSchema,
       is_constructor: z.boolean(),
+      access_flags: androidMethodAccessFlagsSchema,
       def_pos: z.number().int(),
     }),
   ),
@@ -190,4 +195,32 @@ export const normalizeJadxText = (
     reported_total_bytes:
       total !== null && Number.isSafeInteger(total) ? total : null,
   };
+};
+
+/** Decode method-specific DEX bits once at the provider normalization boundary. */
+export const decodeJadxMethodAccessFlags = (
+  flags: number,
+): z.infer<typeof androidMethodAccessFlagNameSchema>[] => {
+  const modifiers: readonly (readonly [
+    number,
+    z.infer<typeof androidMethodAccessFlagNameSchema>,
+  ])[] = [
+    [0x1, "public"],
+    [0x2, "private"],
+    [0x4, "protected"],
+    [0x8, "static"],
+    [0x10, "final"],
+    [0x20, "synchronized"],
+    [0x40, "bridge"],
+    [0x80, "varargs"],
+    [0x100, "native"],
+    [0x400, "abstract"],
+    [0x800, "strict"],
+    [0x1000, "synthetic"],
+    [0x10000, "constructor"],
+    [0x20000, "declared_synchronized"],
+  ];
+  return modifiers
+    .filter(([bit]) => (flags & bit) !== 0)
+    .map(([, name]) => name);
 };

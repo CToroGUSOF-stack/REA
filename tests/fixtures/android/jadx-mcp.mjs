@@ -39,6 +39,7 @@ const methods = [
     signature: "onCreate(Bundle): void",
     dex_descriptor: "(Landroid/os/Bundle;)V",
     is_constructor: false,
+    access_flags: 0x1,
     def_pos: 0,
   },
   {
@@ -46,6 +47,7 @@ const methods = [
     signature: "choose(String): void",
     dex_descriptor: "(Ljava/lang/String;)V",
     is_constructor: false,
+    access_flags: 0x1,
     def_pos: 0,
   },
   {
@@ -53,6 +55,7 @@ const methods = [
     signature: "choose(int): void",
     dex_descriptor: "(I)V",
     is_constructor: false,
+    access_flags: 0x1,
     def_pos: 0,
   },
 ];

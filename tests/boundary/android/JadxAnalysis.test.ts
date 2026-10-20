@@ -21,6 +21,7 @@ const summary = {
       signature: "choose(String): void",
       dex_descriptor: "(Ljava/lang/String;)V",
       is_constructor: false,
+      access_flags: 0x1,
       def_pos: 0,
     },
     {
@@ -28,6 +29,7 @@ const summary = {
       signature: "choose(int): void",
       dex_descriptor: "(I)V",
       is_constructor: false,
+      access_flags: 0x1,
       def_pos: 0,
     },
   ],
@@ -501,6 +503,138 @@ it.each([
           }),
         ]),
       },
+    });
+  },
+);
+
+it("preserves raw DEX method flags and decodes method-specific modifiers", async () => {
+  const flaggedSummary = {
+    ...summary,
+    methods: [
+      { ...summary.methods[0], access_flags: 0x101 },
+      { ...summary.methods[1], access_flags: 0x80001049 },
+    ],
+  };
+  const tools: JadxToolPort = {
+    json: () => Promise.resolve(flaggedSummary),
+    text: () => Promise.reject(new Error("unexpected text call")),
+  };
+  const result = await analyzeJadxRequest(
+    tools,
+    {
+      operation: "inspect_android_class",
+      input: { path: "/fixture.apk", class_name: "fixture.Target" },
+    },
+    {} as never,
+    engine,
+  );
+  expect(result).toMatchObject({
+    methods: [
+      { access_flags: 0x101, access_flag_names: ["public", "native"] },
+      {
+        access_flags: 0x80001049,
+        access_flag_names: ["public", "static", "bridge", "synthetic"],
+      },
+    ],
+  });
+});
+
+it.each([
+  [0x101, "native"],
+  [0x401, "abstract"],
+  [0x501, "conflicting_access_flags"],
+] as const)(
+  "reports absent bodies from flags %i without asking for decompiled text",
+  async (flags, reason) => {
+    const calls: string[] = [];
+    const tools: JadxToolPort = {
+      json: (name) => {
+        calls.push(name);
+        if (name !== "get_class_summary")
+          throw new Error("No body should be requested");
+        return Promise.resolve({
+          ...summary,
+          method_count: 1,
+          methods: [{ ...summary.methods[0], access_flags: flags }],
+        });
+      },
+      text: () => Promise.reject(new Error("unexpected text call")),
+    };
+    const result = await analyzeJadxRequest(
+      tools,
+      {
+        operation: "inspect_android_method",
+        input: {
+          path: "/fixture.apk",
+          class_name: "fixture.Target",
+          method_name: "choose",
+        },
+      },
+      {} as never,
+      engine,
+    );
+    expect(result).toMatchObject({
+      representation: null,
+      body_status: "not_available",
+      body_unavailable_reason: reason,
+      markers: [
+        ...(flags & 0x100 ? ["native_method"] : []),
+        ...(flags & 0x400 ? ["abstract_method"] : []),
+      ],
+      fell_back: false,
+      method: { access_flags: flags },
+      source: { text: "" },
+    });
+    expect(calls).toEqual(["get_class_summary"]);
+  },
+);
+
+it.each(["", "// method exists but has no decompiled body (native/abstract)"])(
+  "keeps an unexplained absent body distinct from observed native or abstract flags: %s",
+  async (text) => {
+    const tools: JadxToolPort = {
+      json: (name) =>
+        Promise.resolve(
+          name === "get_class_summary"
+            ? {
+                ...summary,
+                method_count: 1,
+                methods: summary.methods.slice(0, 1),
+              }
+            : {
+                class_name: summary.full_name,
+                method_name: "choose",
+                full_name: "fixture.Target.choose",
+                dex_descriptor: summary.methods[0]!.dex_descriptor,
+                overload_index: 0,
+                overload_count: 1,
+                mode: "java",
+                fell_back: false,
+                markers: ["observed_engine_marker"],
+                body: text,
+              },
+        ),
+      text: () => Promise.reject(new Error("unexpected text call")),
+    };
+    const result = await analyzeJadxRequest(
+      tools,
+      {
+        operation: "inspect_android_method",
+        input: {
+          path: "/fixture.apk",
+          class_name: summary.full_name,
+          method_name: "choose",
+        },
+      },
+      {} as never,
+      engine,
+    );
+    expect(result).toMatchObject({
+      representation: null,
+      body_status: "not_available",
+      body_unavailable_reason: "no_decompiled_body",
+      markers: ["observed_engine_marker"],
+      source: { text },
     });
   },
 );

@@ -156,11 +156,21 @@ missing Java; it does not infer why the method was omitted or name a replacement
 Unresolved or duplicate disassembly identities fail instead of attributing another
 method's instructions to the selection.
 
-Native and abstract methods are identified from access flags
-captured before code generation. They report `body_status: "not_available"`, an
-empty source, and the `native_method` or `abstract_method` marker; their declarations
-are not passed through the engine's source slicer. Other missing decompiled bodies
-do not establish either access flag.
+Method entries expose the raw unsigned DEX `access_flags`
+and decoded `access_flag_names`, including `native`, `abstract`, `static`,
+`synthetic`, and `bridge`. The bridge snapshots these flags before decompilation
+can rewrite members; unknown bits remain preserved in the raw value.
+
+Native and abstract methods report `body_status: "not_available"` with
+`body_unavailable_reason: "native"` or `"abstract"` and empty source text,
+without requesting a decompiled body. When both flags are set, the reason is
+`"conflicting_access_flags"`; both flags and the raw value remain visible.
+Other missing bodies report `"no_decompiled_body"`; available bodies have a
+null reason. Unavailable bodies have a null `representation`, while available
+bodies report `"java"` or `"smali"`. Engine markers and placeholder text are
+preserved when a body RPC was made; flag-only results retain `native_method`
+and `abstract_method` markers derived from the frozen flags.
+Class-level access flags are outside this method-focused contract.
 
 Static initializers (`<clinit>`) return smali with the
 `static_initializer_disassembly` marker. Java decompilation can move their
