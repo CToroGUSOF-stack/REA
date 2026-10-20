@@ -183,6 +183,28 @@ Kimi Code also discovers personal skills in `~/.agents/skills` and project-local
 and verifies the matching skill files through the normal shared-skill flow.
 Start a new Kimi Code session to pick up MCP and skill changes.
 
+### Kimi Code plugin
+
+The repository root carries a `kimi.plugin.json`, so Kimi Code can install REA
+as a plugin directly:
+
+```text
+/plugins install https://github.com/morluto/rea
+```
+
+The plugin declares the same MCP registration setup writes (pinned
+`npx -y rea-agents@<version> mcp`, compact input-schema profile, and the Ghidra
+startup timeouts) and ships the `reverse-engineer-anything` skill. It also sets
+`deferred: true` on the server, so on clients where progressive tool disclosure
+is active — the Kimi Code desktop app enables it — REA's tools stay out of the
+model's base context and load on demand through `select_tools`. In the terminal
+CLI the experimental `tool-select` flag remains off by default; enable it in
+`/experiments` or with `KIMI_CODE_EXPERIMENTAL_TOOL_SELECT=1` to get the same
+deferred loading there. Without the flag the registration falls back to inline
+tools with the compact profile. `npm run release-metadata:check` keeps the manifest
+aligned with `package.json`, and release-please bumps its pinned versions
+through the `kimi.plugin.json` extra-files entries.
+
 ## Pi
 
 For [Pi](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/mcp.md),

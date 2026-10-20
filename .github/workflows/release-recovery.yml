@@ -84,7 +84,7 @@ jobs:
         run: node scripts/verify-published-package.mjs "$RECOVERY_VERSION"
       - name: Validate released registry metadata
         working-directory: .cache/release-source
-        run: npm run mcp-registry:check
+        run: npm run release-metadata:check
 
   publish-mcp:
     name: Finish MCP Registry publication

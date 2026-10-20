@@ -405,6 +405,6 @@ jobs:
           persist-credentials: false
 
       - name: Verify package and registry metadata versions
-        run: npm run mcp-registry:check
+        run: npm run release-metadata:check
 
       - uses: ./.github/actions/publish-mcp

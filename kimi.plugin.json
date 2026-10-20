@@ -1,0 +1,34 @@
+{
+  "name": "rea",
+  "version": "6.5.0",
+  "description": "Reverse engineer anything from your terminal or agent with one CLI and MCP server.",
+  "license": "MIT",
+  "homepage": "https://github.com/morluto/rea",
+  "keywords": [
+    "reverse-engineering",
+    "binary-analysis",
+    "mcp",
+    "ghidra",
+    "ida"
+  ],
+  "skills": "./.agents/skills/reverse-engineer-anything/",
+  "mcpServers": {
+    "rea": {
+      "command": "npx",
+      "_releasePleaseStart": "x-release-please-start-version",
+      "args": ["-y", "rea-agents@6.5.0", "mcp"],
+      "_releasePleaseEnd": "x-release-please-end",
+      "env": {
+        "REA_MCP_INPUT_SCHEMA_PROFILE": "compact"
+      },
+      "startupTimeoutMs": 30000,
+      "toolTimeoutMs": 450000,
+      "deferred": true
+    }
+  },
+  "interface": {
+    "displayName": "REA",
+    "shortDescription": "Reverse engineer native, managed, Electron, firmware, and browser targets",
+    "websiteURL": "https://github.com/morluto/rea"
+  }
+}
