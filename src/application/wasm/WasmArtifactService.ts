@@ -11,11 +11,12 @@ import {
 import { createEvidence, type Evidence } from "../../domain/evidence.js";
 import {
   inspectWasmArtifactInputSchema,
+  type InspectWasmArtifactInput,
   wasmArtifactSchema,
   wasmArtifactMatchesSubject,
 } from "../../domain/wasm/wasmArtifact.js";
 import { analysisInputErrorFromIssues } from "../../domain/inputIssueProjection.js";
-import { err, type Result } from "../../domain/result.js";
+import { err, ok, type Result } from "../../domain/result.js";
 import { completeProviderEvidence } from "../ProviderOperationExecution.js";
 
 const OPERATION = "inspect_wasm_artifact";
@@ -29,13 +30,12 @@ export class WasmArtifactService {
     return this.provider.close();
   }
 
-  /** Preserve exact selected artifact identity and validated upstream observations. */
-  async inspect(
-    rawInput: unknown,
-    options?: ExecutionOptions,
-  ): Promise<Result<Evidence, AnalysisError>> {
-    if (options?.signal?.aborted)
-      return err(new AnalysisCancelledError(OPERATION));
+  /**
+   * Parse caller input and reject relative paths before any delivery or
+   * provider decision. Handlers validate first so malformed input keeps its
+   * field-specific diagnostic ahead of retention or capability refusals.
+   */
+  validate(rawInput: unknown): Result<InspectWasmArtifactInput, AnalysisError> {
     const input = inspectWasmArtifactInputSchema.safeParse(rawInput);
     if (!input.success)
       return err(
@@ -66,20 +66,40 @@ export class WasmArtifactService {
     );
     if (pathIssues.length > 0)
       return err(new AnalysisInputError(OPERATION, undefined, pathIssues));
-    const inspected = await this.provider.inspect(input.data, options);
+    return ok(input.data);
+  }
+
+  /** Preserve exact selected artifact identity and validated upstream observations. */
+  async inspect(
+    rawInput: unknown,
+    options?: ExecutionOptions,
+  ): Promise<Result<Evidence, AnalysisError>> {
+    if (options?.signal?.aborted)
+      return err(new AnalysisCancelledError(OPERATION));
+    const validated = this.validate(rawInput);
+    if (!validated.ok) return validated;
+    return this.inspectValidated(validated.value, options);
+  }
+
+  /** Inspect input that validate() already admitted, without reparsing it. */
+  async inspectValidated(
+    input: InspectWasmArtifactInput,
+    options?: ExecutionOptions,
+  ): Promise<Result<Evidence, AnalysisError>> {
+    if (options?.signal?.aborted)
+      return err(new AnalysisCancelledError(OPERATION));
+    const inspected = await this.provider.inspect(input, options);
     if (!inspected.ok) return inspected;
     const execution = inspected.value;
     const report = wasmArtifactSchema.safeParse(execution.result);
     if (
       !report.success ||
-      report.data.artifact.path !== input.data.path ||
+      report.data.artifact.path !== input.path ||
       !wasmArtifactMatchesSubject(report.data.artifact, execution.subject) ||
       JSON.stringify(report.data.glue.map((item) => item.artifact.path)) !==
-        JSON.stringify(input.data.glue_paths) ||
+        JSON.stringify(input.glue_paths) ||
       JSON.stringify(report.data.candidates.map((item) => item.path)) !==
-        JSON.stringify([
-          ...new Set([input.data.path, ...input.data.candidate_paths]),
-        ])
+        JSON.stringify([...new Set([input.path, ...input.candidate_paths])])
     )
       return err(
         new AnalysisOutputError(
@@ -90,7 +110,7 @@ export class WasmArtifactService {
     return completeProviderEvidence(
       createEvidence(execution.subject, execution.provider, {
         operation: OPERATION,
-        parameters: input.data,
+        parameters: input,
         result: report.data,
         ...(execution.rawResult === null
           ? {}
