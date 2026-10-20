@@ -74,7 +74,8 @@ export type ExecutableMetadata =
 
 /**
  * Parse supported executable headers without I/O. The caller supplies the host
- * architecture used for deterministic FAT Mach-O slice selection.
+ * architecture that FAT Mach-O slice selection prefers; a container without a
+ * host slice selects its first declared supported slice.
  */
 export const parseExecutableHeader = (
   bytes: Buffer,
@@ -140,34 +141,41 @@ const parseFatMachO = (
   if (header.state === "malformed") return err(header.reason);
   const identityError = fatIdentityError(bytes, header);
   if (identityError !== null) return err(identityError);
-  const architectures: HeaderArchitecture[] = [];
-  const slices = new Map<
-    HeaderArchitecture,
-    { readonly offset: number; readonly size: number }
-  >();
-  for (const declaration of header.slices) {
+  const declarations = header.slices.flatMap((declaration) => {
     const architecture = machArchitecture(declaration.cpuType);
-    if (architecture === undefined || architectures.includes(architecture))
-      continue;
-    architectures.push(architecture);
-    slices.set(architecture, {
-      offset: declaration.offset,
-      size: declaration.size,
-    });
-  }
+    return architecture === undefined
+      ? []
+      : [{ architecture, offset: declaration.offset, size: declaration.size }];
+  });
+  const architectures = [
+    ...new Set(declarations.map(({ architecture }) => architecture)),
+  ];
+  // Prefer the slice the host would load; a malformed host slice is an error.
+  // A container without one still declares its images, so select the first
+  // declaration that can hold its Mach-O header, as a thin foreign image would
+  // be. Several declarations, such as CPU subtypes, may share one family.
   const preferred = fatHostArchitecture(host);
-  const slice = preferred === undefined ? undefined : slices.get(preferred);
-  if (preferred === undefined || slice === undefined)
-    return err(`FAT binary has no host-compatible ${host} architecture`);
-  const minimumHeaderSize =
-    preferred === "arm64" || preferred === "x86_64" ? 32 : 28;
-  if (slice.size < minimumHeaderSize)
-    return err(`FAT slice for ${preferred} is shorter than its Mach-O header`);
+  const hostSlice = declarations.find(
+    ({ architecture }) => architecture === preferred,
+  );
+  const candidates = hostSlice === undefined ? declarations : [hostSlice];
+  const selected = candidates.find(
+    ({ architecture, size }) =>
+      size >= (architecture === "arm64" || architecture === "x86_64" ? 32 : 28),
+  );
+  if (selected === undefined) {
+    const first = candidates[0];
+    return err(
+      first === undefined
+        ? "FAT binary declares no supported Mach-O architecture"
+        : `FAT slice for ${first.architecture} is shorter than its Mach-O header`,
+    );
+  }
   return ok({
     format: "mach-o-universal",
-    architecture: preferred,
+    architecture: selected.architecture,
     availableArchitectures: architectures,
-    universalSlice: { offset: slice.offset, size: slice.size },
+    universalSlice: { offset: selected.offset, size: selected.size },
   });
 };
 
