@@ -491,6 +491,9 @@ export const decodeInstructions = (
         operand: operand.value,
       });
     }
+    if (issue === null && prefixStart !== null) {
+      issue = `Unfinished CIL prefix chain at IL offset ${String(prefixStart)} leaves method body`;
+    }
   } catch (cause: unknown) {
     if (cause instanceof ManagedReaderFailure) throw cause;
     issue =

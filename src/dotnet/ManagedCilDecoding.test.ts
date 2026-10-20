@@ -334,6 +334,57 @@ describe("managed operand extent diagnostics", () => {
   );
 });
 
+describe("managed dangling CIL prefix chains", () => {
+  it.each([
+    ["volatile.", [0xfe, 0x13], 0],
+    ["tail.", [0xfe, 0x14], 0],
+    ["readonly.", [0xfe, 0x1e], 0],
+    ["unaligned.", [0xfe, 0x12, 0x01], 0],
+    ["no.", [0xfe, 0x19, 0x04], 0],
+    ["constrained.", [0xfe, 0x16, 0x01, 0x00, 0x00, 0x01], 0],
+    ["preceded volatile.", [0x00, 0xfe, 0x13], 1],
+    ["chained unaligned and volatile.", [0xfe, 0x12, 0x01, 0xfe, 0x13], 0],
+  ] as const)(
+    "reports an unfinished prefix chain at IL offset %d for %s",
+    (_name, il, offset) => {
+      const { body, coverage } = tinyBody(il);
+      expect(body).toMatchObject({
+        status: "malformed",
+        header_format: "tiny",
+        il_size: il.length,
+        normalized_il_sha256: null,
+        issue: `Unfinished CIL prefix chain at IL offset ${String(offset)} leaves method body`,
+      });
+      expect(coverage.state).toBe("partial");
+    },
+  );
+
+  it("retains already decoded instructions before the dangling prefix", () => {
+    const { body, coverage } = tinyBody([0x00, 0x00, 0xfe, 0x13]);
+    expect(body).toMatchObject({
+      status: "malformed",
+      decoded_instruction_count: 3,
+      opcode_counts: { nop: 2, "volatile.": 1 },
+      normalized_il_sha256: null,
+      issue: "Unfinished CIL prefix chain at IL offset 2 leaves method body",
+    });
+    expect(coverage.state).toBe("partial");
+  });
+
+  it("marks a fat method ending in a prefix malformed without a normalized fingerprint", () => {
+    const body = fatBody(Buffer.from([0xfe, 0x13]));
+    expect(body).toMatchObject({
+      status: "malformed",
+      header_format: "fat",
+      il_size: 2,
+      decoded_instruction_count: 1,
+      opcode_counts: { "volatile.": 1 },
+      normalized_il_sha256: null,
+      issue: "Unfinished CIL prefix chain at IL offset 0 leaves method body",
+    });
+  });
+});
+
 describe("managed complete operand decoding", () => {
   // The extent check must also reject nothing that fits, so every multi-byte
   // width is exercised at exactly its own size with a known value. Each body
