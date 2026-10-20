@@ -41,6 +41,7 @@ import { FridaInstrumentationManager } from "../frida/FridaInstrumentationManage
 import { registerFridaTools } from "./registerFridaTools.js";
 import { createBinaryLayoutService } from "../composition/binaryDiagnostics.js";
 import type { BinaryLayoutService } from "../application/binaryDiagnostics/BinaryLayoutService.js";
+import { createCatalogIdentity } from "../catalogIdentity.js";
 import { EvidenceMcpServer } from "./EvidenceMcpServer.js";
 import {
   createToolResultDelivery,
@@ -149,6 +150,10 @@ const ACTIVE_TARGET_INSTRUCTIONS =
   "REA analyzes the active reverse-engineering target. Use the analysis tool that answers the question directly. Search or list symbols when discovery is needed; analyze_function provides a function dossier, and focused procedure tools return individual facets.";
 
 export interface CreateServerOptions {
+  /** Preserve the connection's creation time when materializing its runtime. */
+  readonly startedAt?: string;
+  /** Existing SDK server whose deferred registrations are being materialized. */
+  readonly mcpServer?: EvidenceMcpServer;
   readonly environment?: Readonly<NodeJS.ProcessEnv>;
   readonly delivery?: ToolResultDelivery;
   readonly packetCapture?: PacketCaptureService;
@@ -280,6 +285,10 @@ const createMcpServer = (
     delivery,
     compactPresentation,
     omitOutputSchemas,
+    createCatalogIdentity(
+      compactPresentation,
+      omitOutputSchemas ? "off" : "full",
+    ),
   );
 
 /**
@@ -341,14 +350,28 @@ export const createServer = (
     webModuleTrace,
     javascriptRecovery,
   };
-  const startedAt = new Date().toISOString();
+  const startedAt = options.startedAt ?? new Date().toISOString();
   const logger = options.logger ?? silentLogger;
-  const server = createMcpServer(
-    session,
-    delivery,
-    selectCompactInputSchemaPresentation(environment),
-    omitOutputSchemas,
-  );
+  const server =
+    options.mcpServer ??
+    createMcpServer(
+      session,
+      delivery,
+      selectCompactInputSchemaPresentation(environment),
+      omitOutputSchemas,
+    );
+  if (options.mcpServer !== undefined) {
+    server.attachRuntime(
+      session === undefined
+        ? undefined
+        : (evidence) => session.recordEvidence(evidence),
+      delivery,
+      createCatalogIdentity(
+        selectCompactInputSchemaPresentation(environment),
+        omitOutputSchemas ? "off" : "full",
+      ),
+    );
+  }
   const gdbSessions = new GdbSessionManager({
     environment: providerEnvironment,
   });

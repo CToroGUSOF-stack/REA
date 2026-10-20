@@ -7,7 +7,7 @@ import type { AnalysisOperationPort } from "../application/AnalysisProvider.js";
 import type { BinarySessionPort } from "../application/binary/BinarySessionPort.js";
 import type { PromptCompletionKind } from "../contracts/promptContracts.js";
 import { addressedValueSchema } from "../domain/native/nativeInventory.js";
-import { currentMcpRequestSignal } from "./EvidenceMcpServer.js";
+import { currentMcpRequestSignal } from "./EvidenceMcpServerCore.js";
 import { parseArtifactInventoryEvidence } from "../domain/artifactInventoryEvidence.js";
 import { EvidenceIntegrityError } from "../domain/evidenceErrors.js";
 import { parseProcessCapture } from "../domain/process/processCaptureParsing.js";
