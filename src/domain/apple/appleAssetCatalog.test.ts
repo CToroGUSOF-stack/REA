@@ -84,6 +84,45 @@ describe("compiled Apple asset catalog projection", () => {
     expect(second.total_records).toBe(3);
   });
 
+  it.each([0, 1, 5])(
+    "reports an empty inventory as complete at offset %i",
+    (offset) => {
+      const page = projectAppleAssetCatalogPage({
+        targetSha256: "c".repeat(64),
+        catalogs: [],
+        offset,
+        limit: 1,
+      });
+      expect(page).toMatchObject({
+        catalogs: [],
+        total_records: 0,
+        offset,
+        records: [],
+        next_offset: null,
+        truncated: false,
+      });
+    },
+  );
+
+  it("marks a nonempty page past its first record as truncated", () => {
+    const page = projectAppleAssetCatalogPage({
+      targetSha256: "c".repeat(64),
+      catalogs: [
+        {
+          path: "Resources/Assets.car",
+          sha256: "a".repeat(64),
+          records: parseAppleAssetCatalogRecords([
+            { AssetStorageVersion: 1, Platform: "ios" },
+          ]),
+        },
+      ],
+      offset: 1,
+      limit: 1,
+    });
+    expect(page.records).toEqual([]);
+    expect(page.next_offset).toBeNull();
+    expect(page.truncated).toBe(true);
+  });
   it("rejects malformed pages and invalid utility data", () => {
     expect(appleAssetCatalogInputSchema.safeParse({ offset: -1 }).success).toBe(
       false,
