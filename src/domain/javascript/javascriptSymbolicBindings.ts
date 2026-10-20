@@ -26,6 +26,7 @@ import {
   resolveSemanticBindingState,
   semanticResolutionBlocked,
   type JavaScriptSemanticAnalysisState,
+  type JavaScriptSemanticBindingState,
 } from "./javascriptSemanticState.js";
 import {
   symbolicCondition,
@@ -80,6 +81,13 @@ const containsOwnedReturn = (root: t.Node): boolean => {
   return found;
 };
 
+const LOADER_FREE_AMBIENT_VALUES: ReadonlySet<string> = new Set([
+  "Boolean",
+  "String",
+  "setTimeout",
+  "undefined",
+]);
+
 /** Demand-driven substitutions for local bindings, closures and literal module tables. */
 export class JavaScriptSymbolicBindings {
   readonly #writes = new Map<string, PropertyWrite[]>();
@@ -113,6 +121,15 @@ export class JavaScriptSymbolicBindings {
   readonly #namespaceOwners = new Map<string, t.Function>();
   readonly #unsafeExports = new Set<string>();
   readonly #aliasesByBinding = new Map<string, string[]>();
+  readonly #aliasSourcesByBinding = new Map<string, string[]>();
+  readonly #bindingAliasGroups = new Map<string, ReadonlySet<string>>();
+  readonly #loaderFreeBindings = new Map<string, boolean>();
+  readonly #loaderFreeBindingsInProgress = new Set<string>();
+  readonly #loaderFreeFunctionCalls = new WeakMap<
+    t.Function,
+    Map<string, boolean>
+  >();
+  #loaderProofDepth = 0;
   readonly #bootstrapTables: Array<{
     readonly tableAliases: ReadonlySet<string>;
     readonly modules: Map<string, SymbolicValue>;
@@ -121,6 +138,12 @@ export class JavaScriptSymbolicBindings {
   #depth = 0;
   truncated = false;
   unresolved = false;
+  /** An evaluated require named an Electron module. */
+  reachedElectron = false;
+  /** An evaluated require left its module name unresolved. */
+  unresolvedRequire = false;
+  /** A read gave up before an initializer that may supply a module loader. */
+  unresolvedLoader = false;
 
   constructor(
     readonly state: JavaScriptSemanticAnalysisState,
@@ -732,6 +755,14 @@ export class JavaScriptSymbolicBindings {
         initializer.node.end > point)
     ) {
       this.unresolved = true;
+      const parent = this.state.parentsByNode.get(node);
+      const invocation =
+        (t.isCallExpression(parent) || t.isOptionalCallExpression(parent)) &&
+        parent.callee === node
+          ? parent
+          : undefined;
+      if (!this.#isLoaderFreeBinding(binding, invocation))
+        this.unresolvedLoader = true;
       return symbolicUnknown("initializer not available at this read");
     }
     if (this.state.conditionallySkippedExpressions.has(initializer.node))
@@ -745,6 +776,323 @@ export class JavaScriptSymbolicBindings {
       });
     }
     return value;
+  }
+
+  #isLoaderFreeBinding(
+    binding: JavaScriptSemanticBindingState,
+    invocation?: t.CallExpression | t.OptionalCallExpression,
+    callerParameterLoaderFree?: ReadonlyMap<string, boolean>,
+  ): boolean {
+    if (
+      this.#mutated.has(binding.bindingId) ||
+      this.#writes.has(binding.bindingId) ||
+      binding.memberWrites.length > 0 ||
+      binding.escapedPaths.length > 0
+    )
+      return false;
+    if (invocation === undefined) {
+      const cached = this.#loaderFreeBindings.get(binding.bindingId);
+      if (cached !== undefined) return cached;
+    }
+    if (this.#loaderFreeBindingsInProgress.has(binding.bindingId)) return false;
+    if (this.#loaderProofDepth >= 128) {
+      this.truncated = true;
+      return false;
+    }
+    const initializer =
+      binding.definitions.length === 1 &&
+      ["variable", "function", "class"].includes(
+        binding.definitions[0]?.kind ?? "",
+      ) &&
+      binding.initializers.length === 1
+        ? binding.initializers[0]
+        : undefined;
+    if (initializer === undefined) {
+      if (invocation === undefined)
+        this.#loaderFreeBindings.set(binding.bindingId, false);
+      return false;
+    }
+    this.#loaderFreeBindingsInProgress.add(binding.bindingId);
+    this.#loaderProofDepth += 1;
+    try {
+      const loaderFree = this.#isLoaderFree(
+        initializer.node,
+        0,
+        invocation,
+        callerParameterLoaderFree,
+      );
+      if (invocation === undefined)
+        this.#loaderFreeBindings.set(binding.bindingId, loaderFree);
+      return loaderFree;
+    } finally {
+      this.#loaderProofDepth -= 1;
+      this.#loaderFreeBindingsInProgress.delete(binding.bindingId);
+    }
+  }
+
+  #isLoaderFree(
+    node: t.Node,
+    depth = 0,
+    invocation?: t.CallExpression | t.OptionalCallExpression,
+    callerParameterLoaderFree?: ReadonlyMap<string, boolean>,
+  ): boolean {
+    if (!this.#chargeLoaderProof()) return false;
+    if (depth >= 128) {
+      this.truncated = true;
+      return false;
+    }
+    if (t.isTemplateLiteral(node))
+      return (
+        node.quasis.every(
+          (quasi) =>
+            this.#chargeLoaderProof() &&
+            !ELECTRON_MODULE.test(quasi.value.cooked ?? quasi.value.raw),
+        ) &&
+        node.expressions.every((expression) =>
+          this.#isLoaderFree(expression, depth + 1),
+        )
+      );
+    if (t.isLiteral(node)) return true;
+    if (t.isIdentifier(node)) {
+      const binding = resolveSemanticBindingState(this.state, node, node.name);
+      return binding !== undefined
+        ? this.#isLoaderFreeBinding(
+            binding,
+            invocation,
+            callerParameterLoaderFree,
+          )
+        : !semanticResolutionBlocked(this.state, node, node.name) &&
+            !this.state.ambientBindingWrites.has(node.name) &&
+            LOADER_FREE_AMBIENT_VALUES.has(node.name);
+    }
+    if (t.isUnaryExpression(node))
+      return (
+        node.operator === "typeof" ||
+        this.#isLoaderFree(node.argument, depth + 1)
+      );
+    if (t.isBinaryExpression(node))
+      return (
+        this.#isLoaderFree(node.left, depth + 1) &&
+        this.#isLoaderFree(node.right, depth + 1)
+      );
+    if (t.isLogicalExpression(node))
+      return (
+        this.#isLoaderFree(
+          node.left,
+          depth + 1,
+          invocation,
+          callerParameterLoaderFree,
+        ) &&
+        this.#isLoaderFree(
+          node.right,
+          depth + 1,
+          invocation,
+          callerParameterLoaderFree,
+        )
+      );
+    if (t.isConditionalExpression(node))
+      return (
+        this.#isLoaderFree(node.test, depth + 1) &&
+        this.#isLoaderFree(
+          node.consequent,
+          depth + 1,
+          invocation,
+          callerParameterLoaderFree,
+        ) &&
+        this.#isLoaderFree(
+          node.alternate,
+          depth + 1,
+          invocation,
+          callerParameterLoaderFree,
+        )
+      );
+    if (t.isSequenceExpression(node))
+      return node.expressions.every((expression, index) =>
+        this.#isLoaderFree(
+          expression,
+          depth + 1,
+          index === node.expressions.length - 1 ? invocation : undefined,
+          callerParameterLoaderFree,
+        ),
+      );
+    if (t.isObjectExpression(node))
+      return node.properties.every((property) => {
+        if (!this.#chargeLoaderProof()) return false;
+        if (t.isSpreadElement(property))
+          return this.#isLoaderFree(property.argument, depth + 1);
+        if (t.isObjectMethod(property))
+          return (
+            (!property.computed ||
+              this.#isLoaderFree(property.key, depth + 1)) &&
+            this.#isLoaderFreeFunction(property)
+          );
+        return (
+          (!property.computed || this.#isLoaderFree(property.key, depth + 1)) &&
+          this.#isLoaderFree(property.value, depth + 1)
+        );
+      });
+    if (t.isArrayExpression(node))
+      return node.elements.every(
+        (element) =>
+          element === null ||
+          (t.isSpreadElement(element)
+            ? this.#chargeLoaderProof() &&
+              this.#isLoaderFree(element.argument, depth + 1)
+            : this.#isLoaderFree(element, depth + 1)),
+      );
+    if (t.isMemberExpression(node) || t.isOptionalMemberExpression(node)) {
+      const object = unwrapJavaScriptExpression(node.object).node;
+      const key = semanticStaticPropertyKey(node.property, node.computed);
+      const ownObjectProperty =
+        key !== null &&
+        t.isObjectExpression(object) &&
+        object.properties.some(
+          (property) =>
+            !t.isSpreadElement(property) &&
+            !isObjectPrototypeSetter(property, key) &&
+            semanticStaticPropertyKey(property.key, property.computed) === key,
+        );
+      return (
+        (t.isLiteral(object) ||
+          t.isObjectExpression(object) ||
+          t.isArrayExpression(object)) &&
+        this.#isLoaderFree(object, depth + 1) &&
+        (!node.computed || this.#isLoaderFree(node.property, depth + 1)) &&
+        (ownObjectProperty ||
+          this.state.prototypeRequireMutationObserved === false)
+      );
+    }
+    if (t.isFunction(node))
+      return this.#isLoaderFreeFunction(
+        node,
+        invocation,
+        callerParameterLoaderFree,
+      );
+    return false;
+  }
+
+  #isLoaderFreeFunction(
+    node: t.Function,
+    invocation?: t.CallExpression | t.OptionalCallExpression,
+    callerParameterLoaderFree?: ReadonlyMap<string, boolean>,
+  ): boolean {
+    const functionScope = this.state.scopeByNode.get(node);
+    if (functionScope === undefined) return false;
+    const parameterLoaderFree = new Map<string, boolean>();
+    const parameterStates: string[] = [];
+    const argumentLoaderFree = (
+      argument: t.CallExpression["arguments"][number] | undefined,
+    ): boolean => {
+      if (argument === undefined || !t.isExpression(argument)) return false;
+      if (t.isIdentifier(argument)) {
+        const binding = resolveSemanticBindingState(
+          this.state,
+          argument,
+          argument.name,
+        );
+        if (binding?.kind === "parameter")
+          return callerParameterLoaderFree?.get(binding.bindingId) ?? false;
+      }
+      return this.#isLoaderFree(
+        argument,
+        0,
+        undefined,
+        callerParameterLoaderFree,
+      );
+    };
+    runtimeFunctionParameters(node).forEach((parameter, index) => {
+      const target = t.isRestElement(parameter)
+        ? parameter.argument
+        : parameter;
+      if (!t.isIdentifier(target)) {
+        parameterStates.push("0");
+        return;
+      }
+      const binding = resolveSemanticBindingState(
+        this.state,
+        target,
+        target.name,
+      );
+      const loaderFree = t.isRestElement(parameter)
+        ? invocation !== undefined &&
+          invocation.arguments.slice(index).every(argumentLoaderFree)
+        : argumentLoaderFree(invocation?.arguments[index]);
+      if (binding !== undefined)
+        parameterLoaderFree.set(binding.bindingId, loaderFree);
+      parameterStates.push(loaderFree ? "1" : "0");
+    });
+    const signature = parameterStates.join("");
+    if (invocation !== undefined) {
+      const cached = this.#loaderFreeFunctionCalls.get(node)?.get(signature);
+      if (cached !== undefined) return cached;
+    }
+    let loaderFree = true;
+    traverseJavaScriptAst(node, {
+      skip: () => !loaderFree,
+      enter: (child, parent, readAncestors) => {
+        if (!this.#chargeLoaderProof()) {
+          loaderFree = false;
+          return;
+        }
+        if (
+          (t.isIdentifier(child) &&
+            parent !== null &&
+            t.isReferenced(child, parent, readAncestors().at(-2)) &&
+            !this.#isLoaderFreeFunctionReference(
+              child,
+              functionScope.scopeId,
+              parameterLoaderFree,
+              parent,
+            )) ||
+          t.isThisExpression(child) ||
+          t.isImport(child) ||
+          t.isImportExpression(child) ||
+          (t.isStringLiteral(child) &&
+            ELECTRON_MODULE.test(child.value) &&
+            !(t.isBinaryExpression(parent) && parent.operator === "+"))
+        )
+          loaderFree = false;
+      },
+    });
+    if (invocation !== undefined) {
+      const cached = this.#loaderFreeFunctionCalls.get(node) ?? new Map();
+      cached.set(signature, loaderFree);
+      this.#loaderFreeFunctionCalls.set(node, cached);
+    }
+    return loaderFree;
+  }
+
+  #isLoaderFreeFunctionReference(
+    node: t.Identifier,
+    functionScopeId: string,
+    parameterLoaderFree: ReadonlyMap<string, boolean>,
+    parent: t.Node,
+  ): boolean {
+    const binding = resolveSemanticBindingState(this.state, node, node.name);
+    if (binding === undefined)
+      return (
+        !semanticResolutionBlocked(this.state, node, node.name) &&
+        !this.state.ambientBindingWrites.has(node.name) &&
+        LOADER_FREE_AMBIENT_VALUES.has(node.name)
+      );
+    if (binding.kind === "parameter")
+      return parameterLoaderFree.get(binding.bindingId) ?? false;
+    if (binding.kind === "catch") return false;
+    const invocation =
+      (t.isCallExpression(parent) || t.isOptionalCallExpression(parent)) &&
+      parent.callee === node
+        ? parent
+        : undefined;
+    return (
+      this.#scopeContains(binding.scopeId, functionScopeId) ||
+      this.#isLoaderFreeBinding(binding, invocation, parameterLoaderFree)
+    );
+  }
+
+  #chargeLoaderProof(): boolean {
+    if (--this.#remainingEvaluations >= 0) return true;
+    this.truncated = true;
+    return false;
   }
 
   #readBoundary(
@@ -1111,10 +1459,13 @@ export class JavaScriptSymbolicBindings {
           value.path.join(".") === "require"
         ) {
           const spec = args[0];
-          result =
-            spec?.kind === "literal" && typeof spec.value === "string"
-              ? { kind: "external", path: [spec.value] }
-              : symbolicUnknown("dynamic require");
+          if (spec?.kind === "literal" && typeof spec.value === "string") {
+            if (ELECTRON_MODULE.test(spec.value)) this.reachedElectron = true;
+            result = { kind: "external", path: [spec.value] };
+          } else {
+            this.unresolvedRequire = true;
+            result = symbolicUnknown("dynamic require");
+          }
         } else if (
           value.kind !== "function" ||
           this.#activeFunctions.has(value.node)
@@ -1377,7 +1728,28 @@ export class JavaScriptSymbolicBindings {
       const aliases = this.#aliasesByBinding.get(source.bindingId) ?? [];
       aliases.push(binding.bindingId);
       this.#aliasesByBinding.set(source.bindingId, aliases);
+      const sources = this.#aliasSourcesByBinding.get(binding.bindingId) ?? [];
+      sources.push(source.bindingId);
+      this.#aliasSourcesByBinding.set(binding.bindingId, sources);
     }
+  }
+
+  #bindingAliasGroup(bindingId: string): ReadonlySet<string> {
+    const cached = this.#bindingAliasGroups.get(bindingId);
+    if (cached !== undefined) return cached;
+    const group = new Set<string>();
+    const pending = [bindingId];
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (group.has(current)) continue;
+      group.add(current);
+      pending.push(
+        ...(this.#aliasesByBinding.get(current) ?? []),
+        ...(this.#aliasSourcesByBinding.get(current) ?? []),
+      );
+    }
+    for (const member of group) this.#bindingAliasGroups.set(member, group);
+    return group;
   }
 
   #invalidateBootstrapTable(
@@ -1428,10 +1800,13 @@ export class JavaScriptSymbolicBindings {
     }
     if (dynamic && t.isIdentifier(root)) {
       const binding = resolveSemanticBindingState(this.state, root, root.name);
-      if (binding)
-        this.#mutated.add(
-          this.#exportAliases.get(binding.bindingId) ?? binding.bindingId,
-        );
+      if (binding) {
+        const alias = this.#exportAliases.get(binding.bindingId);
+        for (const key of alias === undefined
+          ? this.#bindingAliasGroup(binding.bindingId)
+          : [alias])
+          this.#mutated.add(key);
+      }
       return;
     }
     if (t.isIdentifier(root)) this.#addWrite(root, path, value, site);
@@ -1448,7 +1823,6 @@ export class JavaScriptSymbolicBindings {
     const alias = this.#exportAliases.get(binding.bindingId);
     if (this.#moduleBindings.has(binding.bindingId) && path[0] !== "exports")
       return;
-    const key = alias ?? binding.bindingId;
     const selected = this.#moduleBindings.has(binding.bindingId)
       ? path.slice(1)
       : path;
@@ -1468,14 +1842,18 @@ export class JavaScriptSymbolicBindings {
           t.isSwitchCase(parent) ||
           t.isTryStatement(parent)
         ) {
-          if (selected.length === 0) this.#mutated.add(key);
-          else this.#unsafeExports.add(`${key}:${selected[0] ?? ""}`);
+          if (selected.length === 0) this.#mutated.add(alias);
+          else this.#unsafeExports.add(`${alias}:${selected[0] ?? ""}`);
           return;
         }
       }
     }
-    const writes = this.#writes.get(key) ?? [];
-    writes.push({ path: selected, value, site });
-    this.#writes.set(key, writes);
+    for (const key of alias === undefined
+      ? this.#bindingAliasGroup(binding.bindingId)
+      : [alias]) {
+      const writes = this.#writes.get(key) ?? [];
+      writes.push({ path: selected, value, site });
+      this.#writes.set(key, writes);
+    }
   }
 }
