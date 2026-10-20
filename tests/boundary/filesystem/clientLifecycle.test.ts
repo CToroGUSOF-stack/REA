@@ -60,6 +60,7 @@ describe("client configuration filesystem lifecycle", () => {
       "gemini_cli",
       "windsurf",
       "devin",
+      "froe",
       "opencode",
       "antigravity",
       "copilot_cli",

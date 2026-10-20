@@ -539,6 +539,16 @@ export const SUPPORTED_CLIENT_DEFINITIONS = [
     format: "json",
   },
   {
+    name: "froe",
+    displayName: "Froe",
+    configPath: (context: ClientPathContext) =>
+      join(xdgConfigHome(context), "froe", "config.json"),
+    markerPath: (context: ClientPathContext) =>
+      join(xdgConfigHome(context), "froe"),
+    skillPath: [".froe", "skills"],
+    format: "json",
+  },
+  {
     name: "opencode",
     displayName: "OpenCode",
     configPath: existingOpenCodeConfigPath,

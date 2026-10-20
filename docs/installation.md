@@ -491,6 +491,7 @@ hosted connector; see [its configuration](client-configuration.md#other-client-s
 | Gemini CLI         | `gemini_cli`     |
 | Windsurf           | `windsurf`       |
 | Devin              | `devin`          |
+| Froe               | `froe`           |
 | OpenCode           | `opencode`       |
 | Antigravity        | `antigravity`    |
 | GitHub Copilot CLI | `copilot_cli`    |

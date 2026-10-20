@@ -446,3 +446,13 @@ npx -y rea-agents@<version> mcp
 
 Do not put credentials in that command or its arguments. `rea doctor --client grok_bot`
 reports this manual step. `rea uninstall` does not remove the account connector.
+
+For [Froe](https://github.com/xfq/froe), run `rea setup --client froe`.
+Setup writes `mcpServers.rea` in `$XDG_CONFIG_HOME/froe/config.json`,
+defaulting to `~/.config/froe/config.json` when the variable is unset or empty.
+The server command is `npx -y rea-agents@<pinned-version> mcp`, pinned to the
+version performing setup. Skills install to
+`~/.froe/skills/reverse-engineer-anything/`, independently of XDG configuration.
+Use `rea doctor --client froe --skill` to check both registrations and skills.
+`rea uninstall` discovers and removes the REA registration and managed skill
+while preserving unrelated settings.
