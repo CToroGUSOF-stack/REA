@@ -1,10 +1,13 @@
 import { expect, it } from "vitest";
 
-import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
+import {
+  AnalysisCancelledError,
+  AnalysisOutputError,
+} from "../domain/analysisErrorCore.js";
 import { BrowserObservationError } from "../domain/browserObservationError.js";
 import { parseEvidence } from "../domain/evidence.js";
 import { browserScenarioInputSchema } from "../domain/browserScenario.js";
-import { err } from "../domain/result.js";
+import { err, ok } from "../domain/result.js";
 import { scriptScenarioFixture } from "../../tests/fixtures/webScriptCapture.js";
 import type { BrowserScenarioCapturePort } from "./BrowserScenarioCapturePort.js";
 import { captureBrowserScenario } from "./BrowserScenarioCaptureService.js";
@@ -15,6 +18,53 @@ const scenario = browserScenarioInputSchema.parse({
   actions: [{ step_id: "settle", action: "wait_for_timeout", duration_ms: 1 }],
 });
 const capture = scriptScenarioFixture();
+
+it("retains interrupted raw observations without relabeling cancellation", async () => {
+  const partial = {
+    kind: "browser-scenario-observation" as const,
+    capture: {
+      browser: capture.browser,
+      scenario: capture.scenario,
+      duration_ms: capture.duration_ms,
+      steps: capture.steps.slice(0, 1),
+      events: capture.events,
+      limitations: capture.limitations,
+    },
+  };
+  const reason = new Error("interrupted snapshot");
+  const failure = new AnalysisCancelledError("capture_browser_scenario", {
+    cause: reason,
+    partialObservation: partial,
+  });
+  const provider: BrowserScenarioCapturePort = {
+    identity: () => ({
+      id: "scenario-fixture",
+      name: "Scenario fixture",
+      version: "1",
+    }),
+    captureScenario: async () => err(failure),
+  };
+  const result = await captureBrowserScenario(provider, scenario);
+  if (result.ok) throw new Error("Expected interrupted capture failure");
+  expect(result.error).toBe(failure);
+  expect(result.error.cause).toBe(reason);
+  expect(result.error.partialObservation).toBe(partial);
+});
+
+it("still rejects a malformed successful capture before Evidence composition", async () => {
+  const provider: BrowserScenarioCapturePort = {
+    identity: () => ({
+      id: "scenario-fixture",
+      name: "Scenario fixture",
+      version: "1",
+    }),
+    captureScenario: async () => ok({ ...capture, steps: [] }),
+  };
+  const result = await captureBrowserScenario(provider, scenario);
+  if (result.ok) throw new Error("Expected malformed capture failure");
+  expect(result.error).toBeInstanceOf(AnalysisOutputError);
+  expect(result.error.partialObservation).toBeUndefined();
+});
 
 it("converts a retained raw scenario capture into partial Evidence", async () => {
   const failure = new AnalysisCancelledError("capture_browser_scenario", {

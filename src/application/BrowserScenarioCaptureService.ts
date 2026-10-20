@@ -52,17 +52,9 @@ export const captureBrowserScenario = async (
           report.data,
           provider.identity(),
         );
-      } else if (!report.success) {
-        if (captured.error instanceof AnalysisCancelledError)
-          return err(
-            new AnalysisOutputError(
-              OPERATION,
-              "Browser scenario provider retained a malformed completed capture.",
-              { cause: report.error },
-            ),
-          );
-        return captured;
       }
+      // Failed operations may retain raw, incomplete observations. Only a
+      // validated completed capture can be promoted to Evidence above.
     }
     return captured;
   }

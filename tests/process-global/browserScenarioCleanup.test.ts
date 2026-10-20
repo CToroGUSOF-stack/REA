@@ -225,6 +225,43 @@ it("retains the completed scenario when cancellation arrives during final close"
   }
 });
 
+it("retains raw observations when the initial snapshot is cancelled through the CLI", async () => {
+  const savedExitCode = process.exitCode;
+  class InterruptedSnapshotSession extends RetrySession {
+    override async capture(): Promise<never> {
+      throw new AnalysisCancelledError("capture_browser_scenario", {
+        cause: new Error("initial snapshot interrupted"),
+      });
+    }
+  }
+  const session = new InterruptedSnapshotSession(0);
+  const provider = new PlaywrightBrowserScenarioProvider(async () => session);
+  state.provider = provider;
+  try {
+    const result = await serveScenario();
+    expect(result.output).toMatchObject({
+      code: "cancelled",
+      category: "cancelled",
+      details: {
+        partial_observation: {
+          kind: "browser-scenario-observation",
+          capture: {
+            browser: { cleanup: "terminated-owned-process" },
+            steps: [],
+            events: { retained: 0, dropped: 0, items: [] },
+          },
+        },
+      },
+    });
+    expect(session.closeBrowserCalls).toBe(1);
+    expect(session.profileRemovalCalls).toBe(1);
+  } finally {
+    await provider.close();
+    state.provider = undefined;
+    process.exitCode = savedExitCode;
+  }
+});
+
 it("retries retained browser cleanup before the one-shot CLI releases its provider", async () => {
   const savedExitCode = process.exitCode;
   const session = new RetrySession();
