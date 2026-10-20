@@ -477,6 +477,23 @@ Provider failures in doctor do not prevent unrelated target-free tools. To check
 readiness for one task instead of auditing every integration, see
 [Check readiness for your task](#check-readiness-for-your-task).
 
+## Claude Code plugin
+
+Claude Code can install REA as a plugin, which registers the local MCP server
+and installs the `reverse-engineer-anything` skill together. In a Claude Code
+session:
+
+```text
+/plugin install rea --marketplace morluto/rea
+```
+
+The marketplace lives in this repository, while the plugin content ships from
+the published `rea-agents` package, so the skill and the registered server stay
+on one released version. The server starts on demand with the session; no
+`doctor` registration step is needed. For a development checkout, load the local
+build with `claude --plugin-dir <path to repository>` after `npm ci` and a
+build; the launcher prefers the local `dist` output over the published package.
+
 ## Supported agents
 
 Setup can configure these clients for REA's local MCP server. Grok Bot uses a manual

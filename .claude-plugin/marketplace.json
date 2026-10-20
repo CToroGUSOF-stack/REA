@@ -1,0 +1,27 @@
+{
+  "name": "rea",
+  "description": "REA plugin marketplace. Plugin content ships from the published rea-agents npm package, so installs stay pinned to a released version.",
+  "owner": {
+    "name": "morluto",
+    "url": "https://github.com/morluto"
+  },
+  "plugins": [
+    {
+      "name": "rea",
+      "source": {
+        "source": "npm",
+        "package": "rea-agents"
+      },
+      "description": "Reverse engineer anything from your terminal or agent with one CLI and MCP server.",
+      "category": "reverse-engineering",
+      "tags": [
+        "reverse-engineering",
+        "binary-analysis",
+        "decompiler",
+        "ghidra",
+        "ida",
+        "mcp"
+      ]
+    }
+  ]
+}
