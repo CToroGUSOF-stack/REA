@@ -80,7 +80,8 @@ export const expandPrefix = (
     readonly executable: string | null;
   },
 ): Expansion => {
-  const variable = /^@(executable_path|loader_path)(?:\/(.*))?$/u.exec(raw);
+  // Load-command paths can contain line terminators; the suffix is not a text line.
+  const variable = /^@(executable_path|loader_path)(?:\/(.*))?$/su.exec(raw);
   if (variable !== null) {
     const rest = variable[2] ?? "";
     if (variable[1] === "loader_path")
