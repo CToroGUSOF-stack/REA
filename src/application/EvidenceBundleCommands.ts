@@ -7,7 +7,11 @@ import type { EvidenceBundle } from "../domain/evidenceBundle.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
 import { err, ok, type Result } from "../domain/result.js";
-import { compareBundles } from "../domain/bundleComparison.js";
+import {
+  bundleComparisonInputSchema,
+  compareBundles,
+} from "../domain/bundleComparison.js";
+import { analysisInputErrorFromIssues } from "../domain/inputIssueProjection.js";
 import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import {
   readEvidenceBundle,
@@ -70,7 +74,20 @@ export const exportEvidenceBundleCommand = async (
 export const compareEvidenceBundlesCommand = async (input: {
   readonly leftPath: string;
   readonly rightPath: string;
+  readonly recordPairs?: unknown;
 }): Promise<Result<JsonValue, AnalysisError>> => {
+  const pairInput = { record_pairs: input.recordPairs };
+  const parsed = bundleComparisonInputSchema
+    .pick({ record_pairs: true })
+    .safeParse(pairInput);
+  if (!parsed.success)
+    return err(
+      analysisInputErrorFromIssues(
+        "compare_bundles",
+        parsed.error.issues,
+        pairInput,
+      ),
+    );
   // Sealed snapshots let comparison and its bundle digests reuse this
   // authentication instead of re-validating every record twice more.
   const [left, right] = await Promise.all([
@@ -80,7 +97,11 @@ export const compareEvidenceBundlesCommand = async (input: {
   if (!left.ok) return left;
   if (!right.ok) return right;
   try {
-    return ok(jsonValueSchema.parse(compareBundles(left.value, right.value)));
+    return ok(
+      jsonValueSchema.parse(
+        compareBundles(left.value, right.value, parsed.data.record_pairs),
+      ),
+    );
   } catch (cause: unknown) {
     return err(
       new EvidenceIntegrityError("Evidence bundle comparison failed", {
