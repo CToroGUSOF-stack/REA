@@ -36,10 +36,17 @@ describe("browser observation contracts", () => {
     expect(browserEndpointSchema.parse("http://[::1]:9222")).toBe(
       "http://[::1]:9222",
     );
+    // Explicit default ports: the URL API clears `url.port` for :80, but the
+    // caller spelled a port (#5178).
+    expect(browserEndpointSchema.parse("http://127.0.0.1:80")).toBe(
+      "http://127.0.0.1",
+    );
+    expect(browserEndpointSchema.parse("http://[::1]:80")).toBe("http://[::1]");
     for (const value of [
       "http://localhost:9222",
       "http://192.168.1.2:9222",
       "https://127.0.0.1:9222",
+      "http://127.0.0.1",
       "http://127.0.0.1:9222/json/list",
       "http://127.0.0.1:9222/?",
       "http://127.0.0.1:9222/#",
@@ -64,6 +71,15 @@ describe("browser observation contracts", () => {
       transport: "browser_websocket",
       url: "ws://[::1]:9222/devtools/browser/0b1c-socket-id",
       recorded: "ws://[::1]:9222/devtools/browser/[REDACTED]",
+    });
+    expect(
+      browserObservationEndpointSchema.parse(
+        "ws://127.0.0.1:80/devtools/browser/fixture",
+      ),
+    ).toEqual({
+      transport: "browser_websocket",
+      url: "ws://127.0.0.1/devtools/browser/fixture",
+      recorded: "ws://127.0.0.1/devtools/browser/[REDACTED]",
     });
     for (const value of [
       "ws://127.0.0.1/devtools/browser/id",
