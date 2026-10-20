@@ -9,11 +9,28 @@ import {
 } from "./native/nativeAddress.js";
 const evidenceIdSchema = prefixedDigestSchema("ev");
 
+/**
+ * Default and maximum inline shortest-path capacity.
+ *
+ * The number of distinct shortest paths grows with the graph, not with the
+ * caller's declared input, so an uncapped inline list is unbounded even for a
+ * modest dossier set. A caller may raise the capacity up to the ceiling; the
+ * exact total is always reported so a partial list stays visible as partial.
+ */
+export const DEFAULT_CALL_PATH_MAX_PATHS = 64;
+export const CALL_PATH_MAX_PATHS_CEILING = 4_096;
+
 /** Strict input for explicit call-path reconstruction from complete dossiers. */
 export const callPathInputSchema = z.strictObject({
   functions: z.array(evidenceSchema).min(1),
   start: z.object({ address: nativeAddressInputSchema }).strict(),
   goal: z.object({ address: nativeAddressInputSchema }).strict(),
+  max_paths: z
+    .number()
+    .int()
+    .positive()
+    .max(CALL_PATH_MAX_PATHS_CEILING)
+    .default(DEFAULT_CALL_PATH_MAX_PATHS),
 });
 
 const citedNodeSchema = z.object({
@@ -57,18 +74,36 @@ const resultContextShape = {
     edges: z.number().int().min(0),
     depth_reached: z.number().int().min(0),
   }),
+  total_shortest_paths: z
+    .number()
+    .int()
+    .min(0)
+    .describe(
+      "Shortest start-to-goal path count. Exact unless total_shortest_paths_capped is true, where it is a lower bound.",
+    ),
+  total_shortest_paths_capped: z
+    .boolean()
+    .describe(
+      "True when the exact path count exceeds the largest exactly representable integer, so total_shortest_paths only bounds it.",
+    ),
+  /** Whether `paths` omits shortest paths because the selected capacity was reached. */
+  paths_truncated: z
+    .boolean()
+    .describe(
+      "True when `paths` is a prefix of the shortest paths rather than the complete set.",
+    ),
   evidence_links: z.array(evidenceIdSchema).min(1),
   limitations: z.array(z.string()),
 };
 
-/** Evidence-cited directed call-path result containing every shortest path. */
+/** Evidence-cited directed call-path result containing the shortest paths. */
 export const callPathResultSchema = z.union([
   z.object({
     ...resultContextShape,
     status: z.literal("found"),
     shortest_hops: z.number().int().min(0),
     search_scope: z.object({ exhaustive: z.boolean() }),
-    paths: z.array(pathSchema).min(1),
+    paths: z.array(pathSchema).min(1).max(CALL_PATH_MAX_PATHS_CEILING),
   }),
   z.object({
     ...resultContextShape,
@@ -86,6 +121,9 @@ export const callPathResultSchema = z.union([
   }),
 ]);
 
-export type CallPathInput = z.infer<typeof callPathInputSchema>;
+/** Caller-supplied call-path request; `max_paths` is filled from its default. */
+export type CallPathInput = z.input<typeof callPathInputSchema>;
+/** Call-path request after the selected capacity has been applied. */
+export type ParsedCallPathInput = z.output<typeof callPathInputSchema>;
 export type CallPathResult = z.infer<typeof callPathResultSchema>;
 export type OutputCallPath = z.infer<typeof pathSchema>;

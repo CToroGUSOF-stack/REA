@@ -3,6 +3,7 @@ import {
   callPathInputSchema,
   callPathResultSchema,
   type CallPathInput,
+  type ParsedCallPathInput,
   type CallPathResult,
   type OutputCallPath,
 } from "./callPathSchemas.js";
@@ -69,6 +70,55 @@ const distancesToGoal = (
   return depth;
 };
 
+/** First count past the exactly representable range: 2^53. */
+const SHORTEST_PATH_COUNT_CAP = BigInt(Number.MAX_SAFE_INTEGER) + 1n;
+
+/**
+ * Count shortest start-to-goal paths without enumerating them.
+ *
+ * Every path uses only edges that reduce the distance to the goal by one, so the
+ * count follows from one pass over those nodes in increasing distance order. The
+ * walk is bounded by the graph, which is why the reported total stays cheap even
+ * when the number of paths is far past what any inline list could hold.
+ *
+ * Each stored count is capped as it is computed. A total that reaches the cap is
+ * reported together with `capped`, so a caller can tell an exact count from one
+ * that only bounds the true value; without that flag the capped number would be
+ * indistinguishable from an exact count one below it.
+ */
+const countShortestPaths = (
+  graph: CallGraph,
+  start: string,
+  goal: string,
+  goalDistances: ReadonlyMap<string, number>,
+): { readonly total: number; readonly capped: boolean } => {
+  if (!goalDistances.has(start)) return { total: 0, capped: false };
+  const byDistance = [...goalDistances.entries()].sort(
+    (left, right) => left[1] - right[1],
+  );
+  const counts = new Map<string, bigint>();
+  for (const [node, distance] of byDistance) {
+    if (node === goal) {
+      counts.set(node, 1n);
+      continue;
+    }
+    let total = 0n;
+    for (const neighbor of graph.outNeighbors(node))
+      if (goalDistances.get(neighbor) === distance - 1)
+        total += counts.get(neighbor) ?? 0n;
+    counts.set(
+      node,
+      total > SHORTEST_PATH_COUNT_CAP ? SHORTEST_PATH_COUNT_CAP : total,
+    );
+  }
+  const total = counts.get(start) ?? 0n;
+  const capped = total >= SHORTEST_PATH_COUNT_CAP;
+  return {
+    total: capped ? Number.MAX_SAFE_INTEGER : Number(total),
+    capped,
+  };
+};
+
 interface SearchState {
   readonly graph: CallGraph;
   readonly snapshots: ReadonlyMap<string, FunctionSnapshot>;
@@ -89,6 +139,15 @@ export const buildCallPath = (input: CallPathInput): CallPathResult => {
   });
   const goalDistances = distancesToGoal(graph, parsed.goal.address);
   const shortestDepth = goalDistances.get(parsed.start.address) ?? null;
+  // Counting and enumerating are separate costs. The exact total is derived from
+  // the same distance graph without materializing a path, so a caller always
+  // learns how many paths exist even when only a prefix is returned.
+  const shortestPathCount = countShortestPaths(
+    graph,
+    parsed.start.address,
+    parsed.goal.address,
+    goalDistances,
+  );
   const paths =
     shortestDepth === null
       ? []
@@ -97,6 +156,7 @@ export const buildCallPath = (input: CallPathInput): CallPathResult => {
           start: parsed.start.address,
           goal: parsed.goal.address,
           goalDistances,
+          maxPaths: parsed.max_paths,
         }).paths.map((path) => citePath(path, snapshots));
   const shortestHops = paths[0]?.hops;
   const found = shortestHops !== undefined;
@@ -106,6 +166,10 @@ export const buildCallPath = (input: CallPathInput): CallPathResult => {
     start: parsed.start.address,
     goal: parsed.goal.address,
     explored: summarizeSearch(graph, search.reached),
+    total_shortest_paths: shortestPathCount.total,
+    total_shortest_paths_capped: shortestPathCount.capped,
+    paths_truncated:
+      paths.length < shortestPathCount.total || shortestPathCount.capped,
     evidence_links: uniqueEvidence(snapshots.values()),
     limitations: [...new Set(limitations)].sort(compareUnicodeCodePoints),
   };
@@ -142,7 +206,7 @@ const summarizeSearch = (
   ),
 });
 
-const prepareCallGraph = (input: CallPathInput) => {
+const prepareCallGraph = (input: ParsedCallPathInput) => {
   const snapshots = parseSnapshots(input.functions);
   assertCompatible(snapshots);
   if (!snapshots.has(input.start.address))
@@ -153,7 +217,7 @@ const prepareCallGraph = (input: CallPathInput) => {
 };
 
 const parseSnapshots = (
-  groups: CallPathInput["functions"],
+  groups: ParsedCallPathInput["functions"],
 ): Map<string, FunctionSnapshot> => {
   const snapshots = new Map<string, FunctionSnapshot>();
   for (const group of groups) {
@@ -300,6 +364,8 @@ interface EnumerationInput {
   readonly start: string;
   readonly goal: string;
   readonly goalDistances: ReadonlyMap<string, number>;
+  /** Retained path capacity; enumeration stops once this many paths exist. */
+  readonly maxPaths: number;
 }
 
 const enumeratePaths = ({
@@ -307,6 +373,7 @@ const enumeratePaths = ({
   start,
   goal,
   goalDistances,
+  maxPaths,
 }: EnumerationInput): {
   readonly paths: string[][];
 } => {
@@ -337,6 +404,9 @@ const enumeratePaths = ({
       output.push([...path]);
       pending.pop();
       path.pop();
+      // Stop as soon as the retained capacity is filled. The caller learns from
+      // `total_shortest_paths` that the list is a prefix of a larger set.
+      if (output.length >= maxPaths) break;
       continue;
     }
     const neighbor = current.neighbors[current.nextIndex];
