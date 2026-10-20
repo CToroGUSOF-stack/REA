@@ -379,6 +379,47 @@ describe("CdpBrowserProvider: WebMCP discovery and completeness", () => {
   });
 });
 
+describe("CdpBrowserProvider: WebMCP invalid annotation payloads", () => {
+  it.each([
+    ["a non-boolean consequential hint", { webMcpConsequential: "sometimes" }],
+    ["a malformed annotations payload", { webMcpAnnotations: "yes" }],
+    ["a null annotations payload", { webMcpAnnotations: null }],
+  ])(
+    "retains the tool but marks coverage incomplete when the page emits %s",
+    async (_label, annotationsOptions) => {
+      const browser = await startFakeCdpBrowser({
+        webMcpTools: true,
+        ...annotationsOptions,
+      });
+      trackBrowser(browser);
+      const result = await new CdpBrowserProvider().discoverWebMcpTools(
+        discoverWebMcpToolsInputSchema.parse({
+          cdp_endpoint: browser.endpoint,
+          allowed_origins: [browser.allowedOrigin],
+          target_id: "allowed-page",
+          observation_ms: 0,
+        }),
+      );
+
+      if (!result.ok) throw result.error;
+      expect(result.value.status).toBe("available");
+      expect(result.value.tools.items).toHaveLength(1);
+      const tool = result.value.tools.items[0];
+      expect(tool?.name).toBe("search_orders");
+      expect(tool?.annotations).not.toHaveProperty("consequential");
+      expect(result.value.completeness.excluded).toContainEqual(
+        expect.objectContaining({
+          section: "webmcp_tools",
+          reason: "invalid_protocol_value",
+        }),
+      );
+      expect(result.value.completeness.unavailable_sections).toContain(
+        "webmcp_tools",
+      );
+    },
+  );
+});
+
 describe("CdpBrowserProvider: WebMCP replay inventory", () => {
   it("returns every WebMCP registration in the replay", async () => {
     const browser = await startFakeCdpBrowser({
