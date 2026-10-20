@@ -17,7 +17,7 @@ export const SOURCE_TEST_PROJECTS = [
     group: "source",
     include: [
       "src/*.test.ts",
-      "src/{apktool,jeb,adb,artifacts,browser,dotnet,electron,evm,firmware,flutter,pcap,ghidra,go,hopper,ida,inspector,javascript,native,process,reference,rust,server,sqlite,wasm,windows}/**/*.test.ts",
+      "src/{adb,android,apktool,artifacts,browser,captures,dotnet,electron,evm,firmware,flutter,ghidra,go,hopper,ida,inspector,javascript,jeb,native,pcap,process,reference,rust,server,signals,sqlite,wasm,windows}/**/*.test.ts",
     ],
   },
   {

@@ -45,8 +45,12 @@ export const decodeSazCapture = async (
           "unsupported",
           "SAZ archive links are unsupported.",
         );
-      if (entry.declaredSize !== null) {
-        if (!Number.isSafeInteger(entry.declaredSize) || entry.declaredSize < 0)
+      if (entry.kind === "file") {
+        if (
+          entry.declaredSize === null ||
+          !Number.isSafeInteger(entry.declaredSize) ||
+          entry.declaredSize < 0
+        )
           throw new CaptureFormatError("format", "SAZ member size is invalid.");
         declaredBytes += entry.declaredSize;
       }
