@@ -124,6 +124,27 @@ describe("native Mach-O fixup load command boundaries", () => {
       { path: "/fixture/malformed.macho", sha256: "a".repeat(64) },
     );
 
+  it("rejects misaligned load commands and accepts aligned commands of the same kind", () => {
+    const command = Buffer.alloc(12);
+    command.writeUInt32LE(0x7f000001, 0);
+    command.writeUInt32LE(command.length, 4);
+    expect(() =>
+      parseMachoLayout(
+        Buffer.from(machoImage({ commands: [command] })),
+        "arm64",
+      ),
+    ).toThrow(/Invalid load command size/u);
+    const aligned = Buffer.alloc(16);
+    aligned.writeUInt32LE(0x7f000001, 0);
+    aligned.writeUInt32LE(aligned.length, 4);
+    expect(
+      parseMachoLayout(
+        Buffer.from(machoImage({ commands: [aligned] })),
+        "arm64",
+      ).segments,
+    ).toEqual([]);
+  });
+
   it.each<[string, number, number]>([
     ["chained-fixups", 0x80000034, 16],
     ["dyld-info", 0x22, 48],

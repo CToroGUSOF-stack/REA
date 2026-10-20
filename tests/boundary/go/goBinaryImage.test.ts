@@ -328,6 +328,28 @@ it("distinguishes unsupported containers from malformed recognized images", () =
   expect(() => readGoBinaryImage(pe.bytes)).toThrowError(/range|truncated/i);
 });
 
+it("enforces width-dependent Mach-O load command alignment", () => {
+  const command = Buffer.alloc(12);
+  command.writeUInt32LE(0x7f000001, 0);
+  command.writeUInt32LE(command.length, 4);
+  const wide = Buffer.from(machoImage({ commands: [command] }));
+  expect(() => readGoBinaryImage(wide)).toThrowError(
+    expect.objectContaining({
+      name: "GoBinaryFormatFailure",
+      kind: "malformed",
+      message: expect.stringMatching(/load command size/),
+    }),
+  );
+  const narrow = Buffer.from(
+    machoImage({ cpu: CPU.i386, wide: false, commands: [command] }),
+  );
+  expect(readGoBinaryImage(narrow)).toMatchObject({
+    format: "macho",
+    bits: 32,
+    build_info: null,
+  });
+});
+
 it("reports JVM class files as unsupported images instead of fat Mach-O containers", () => {
   expect(() => readGoBinaryImage(javaClassFile())).toThrowError(
     /Only ELF, PE, and thin Mach-O native images are supported/,
