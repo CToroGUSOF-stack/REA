@@ -2184,6 +2184,42 @@ it("confirms no inferior before the shared stop helper signals GDB", async () =>
   expect(fake.children[0]?.killSignals).toEqual(["SIGTERM"]);
 });
 
+it("reports a retained failed-startup owner as closed and refuses console dispatch", async () => {
+  const commands: string[] = [];
+  const fake = createFakeSpawner((_child, token, command) => {
+    commands.push(command);
+    const child = fake.children[0];
+    if (child === undefined) return;
+    if (command.includes("auto-load off")) {
+      child.stdout.write(`${token}^error,msg="not supported"\n`);
+      return;
+    }
+    child.stdout.write(`${token}^done\n`);
+  });
+  const manager = managerWithFakeSpawner(fake.spawnProcess, {
+    stopProcess: async () => ({
+      status: "incomplete",
+      reason: "simulated unconfirmed startup stop",
+    }),
+  });
+
+  const started = await manager.start();
+
+  expect(started.ok).toBe(false);
+  if (started.ok) throw new Error("Expected a failed startup");
+  expect(started.error._tag).toBe("AnalysisCapabilityUnavailableError");
+  const retained = started.error.cleanupResources?.[0];
+  expect(retained).toBeDefined();
+  if (retained === undefined) return;
+  expect(manager.status(retained)?.state).toBe("closed");
+  const dispatched = await manager.execute(retained, "show version");
+  expect(dispatched).toMatchObject({
+    ok: false,
+    error: { _tag: "AnalysisInputError" },
+  });
+  expect(commands).toEqual(["-gdb-set auto-load off"]);
+});
+
 it("retains ownership when manual close receives a truncated empty inferior list", async () => {
   const commands: string[] = [];
   const fake = createFakeSpawner((_child, token, command) => {

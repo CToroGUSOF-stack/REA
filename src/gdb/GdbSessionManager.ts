@@ -808,7 +808,6 @@ export class GdbSessionManager {
         );
         startupTimer.unref();
       });
-      session.ready = true;
       if (signal?.aborted)
         throw new AnalysisCancelledError("start_gdb_session");
       const autoLoad = await this.#request(
@@ -876,6 +875,9 @@ export class GdbSessionManager {
       // Before this point no target command can run. Once a usable session is
       // published, the inferior state is no longer inferred from startup phase.
       session.noInferiorVerified = false;
+      // Readiness is published with the session, never before it: a startup
+      // that fails after the prompt must not leave an owner reporting ready.
+      session.ready = true;
       this.#sessions.set(id, session);
       releaseReservation();
       return ok({ session_id: id, mi_version: miVersion });
@@ -979,6 +981,8 @@ export class GdbSessionManager {
       };
       const stopped = await this.#stopDebuggerOnly(session);
       if (stopped.status === "incomplete") {
+        // Retain this owner for cleanup only: startup never completed, so the
+        // ID must not report ready or accept console commands.
         this.#sessions.set(id, session);
         releaseReservation();
         const cleanup = { reason: stopped.reason, resources: [session.id] };
