@@ -390,6 +390,55 @@ it("reports the worker heap limit only when the runtime enforces V8 heap flags",
   }
 });
 
+// V8 prints this to stderr when the old-space heap is exhausted.
+const heapExhaustedWorker = (heapMb: number) =>
+  new JavaScriptAnalysisWorker({ heapMb, timeoutMs: 30_000 }, (request) =>
+    spawnOwnedProviderProcess({
+      ...request,
+      arguments: [
+        "-e",
+        `const heap = process.versions.bun === undefined ? require("node:v8").getHeapStatistics().heap_size_limit : null;
+process.stdout.write(JSON.stringify({ kind: "ready", heap_limit_bytes: heap }) + "\\n");
+require("node:readline").createInterface({ input: process.stdin }).once("line", (line) => {
+  const { id } = JSON.parse(line);
+  process.stdout.write(JSON.stringify({ kind: "phase", id, phase: "static" }) + "\\n");
+  process.stderr.write("FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory\\n");
+  process.exit(134);
+});`,
+      ],
+    }),
+  );
+
+it.each([
+  [
+    128,
+    "Owned JavaScript worker exhausted its 128 MiB heap while analyzing app.mjs in the static phase; retry with a larger max_heap_mb (at most 16384)",
+  ],
+  [
+    16_384,
+    "Owned JavaScript worker exhausted its 16384 MiB heap while analyzing app.mjs in the static phase",
+  ],
+] as const)(
+  "names the exhausted %i MiB heap and how to raise it",
+  async (heapMb, reason) => {
+    const worker = heapExhaustedWorker(heapMb);
+    try {
+      const result = await worker.analyze(
+        source("app.mjs", "export const observed = 7;"),
+        { nodes: 100, unknowns: 100 },
+      );
+      if (result.ok) throw new Error("expected heap exhaustion");
+      expect(result.error.error).toMatchObject({
+        _tag: "AnalysisResourceConstraintError",
+        resource: "memory",
+        reason,
+      });
+    } finally {
+      await worker.close();
+    }
+  },
+);
+
 it("rejects a worker heap report that contradicts the launching runtime", async () => {
   const worker = resourceFailureWorker(
     "process.versions.bun === undefined ? null : 1",
