@@ -12,6 +12,7 @@ import { GENERATED_MCP_TOOL_CATALOG } from "../../fixtures/mcpToolCatalog.js";
 import {
   arrayItemSchemaError,
   booleanLiteralSchemaError,
+  emptyStringLiteralSchemaError,
 } from "../../fixtures/mcpClientSchemaConstraints.js";
 import { toolRegistrationOptions } from "../../../src/server/toolRegistrationOptions.js";
 
@@ -50,6 +51,11 @@ function schemaErrors(tools: readonly ToolSchemas[]): string[] {
             `${tool.name}.${kind}`,
           );
           if (literalError !== undefined) return [literalError];
+          const emptyLiteralError = emptyStringLiteralSchemaError(
+            schema,
+            `${tool.name}.${kind}`,
+          );
+          if (emptyLiteralError !== undefined) return [emptyLiteralError];
         }
         return [];
       } catch (cause: unknown) {
@@ -283,28 +289,11 @@ function recursiveReferences(tools: readonly ToolSchemas[]): string[] {
   );
 }
 
-const schemaMapKeywords = new Set([
-  "$defs",
-  "definitions",
-  "properties",
-  "patternProperties",
-  "dependentSchemas",
-  "dependencies",
-]);
-const schemaArrayKeywords = new Set(["allOf", "anyOf", "oneOf", "prefixItems"]);
-const schemaChildKeywords = new Set([
-  "items",
-  "additionalItems",
-  "contains",
-  "additionalProperties",
-  "unevaluatedProperties",
-  "unevaluatedItems",
-  "propertyNames",
-  "not",
-  "if",
-  "then",
-  "else",
-]);
+import {
+  schemaArrays as schemaArrayKeywords,
+  schemaChildren as schemaChildKeywords,
+  schemaMaps as schemaMapKeywords,
+} from "../../../src/contracts/jsonSchemaKeywords.js";
 
 function localInputReferences(tools: readonly ToolSchemas[]): string[] {
   return tools.flatMap((tool) => {
@@ -890,6 +879,27 @@ it("checks client array constraints in schema positions while preserving literal
   expect(booleanLiteralSchemaError(booleanMetadata, "literal")).toBe(
     "literal.properties.default.const is boolean",
   );
+});
+
+it("rejects empty-string literals and visits array-valued schema children", () => {
+  const metadata = {
+    type: "object",
+    properties: { value: { type: "string", const: "" } },
+    default: { const: "" },
+    examples: [{ enum: [""] }],
+  };
+  expect(
+    emptyStringLiteralSchemaError({ ...metadata, properties: {} }, "literal"),
+  ).toBeUndefined();
+  expect(emptyStringLiteralSchemaError(metadata, "literal")).toBe(
+    "literal.properties.value.const is an empty string",
+  );
+  expect(
+    emptyStringLiteralSchemaError(
+      { type: "array", items: [{ type: "string", const: "" }] },
+      "literal",
+    ),
+  ).toBe("literal.items[0].const is an empty string");
 });
 
 it.each([false, true])(

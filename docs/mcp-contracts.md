@@ -901,6 +901,10 @@ an affected `not` is omitted, conditional predicates and their branches are
 omitted together, pure boolean-literal `oneOf` branches collapse to a boolean,
 and other affected `oneOf` branches are presented as `anyOf` to retain branch
 guidance without making overlapping widened branches reject inputs.
+Empty-string literals are relaxed the same way: a `const: ""` (or an `enum`
+member that is `""`) is presented as `type: string`, because Gemini function
+declarations reject empty enum members; affected `not`, conditionals, and
+`oneOf` groups follow the same rules above.
 This can make the advertised schema accept inputs the canonical contract
 rejects. The MCP handler still validates every call with the canonical
 contract. The Gemini CLI verifier checks the outgoing

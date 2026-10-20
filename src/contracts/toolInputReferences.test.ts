@@ -10,6 +10,7 @@ import {
   transformAdvertisedInputJsonSchema,
 } from "./toolSchemaMetadata.js";
 import { JAVASCRIPT_APPLICATION_EVIDENCE_EXAMPLE } from "./javascript/javascriptRuntimeReconciliationExample.js";
+import { applicationFeatureSeedSchema } from "../domain/javascript/javascriptFeatureTraceSchemas.js";
 
 it.each(["draft-2020-12", "draft-07"] as const)(
   "honors projection options independently of cached wire transformations in %s",
@@ -606,5 +607,727 @@ describe("advertised Boolean schema composition", () => {
     });
     expect(presented.default).toEqual(literal);
     expect(presented.examples).toEqual([literal]);
+  });
+});
+
+describe("advertised empty-string literals", () => {
+  it("keeps canonical empty-string-literal inputs accepted after advertisement", () => {
+    const canonical = {
+      type: "object",
+      properties: {
+        value: { type: "string", const: "" },
+      },
+      required: ["value"],
+      additionalProperties: false,
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    const canonicalValidate = new Ajv2020({ strict: false }).compile(canonical);
+    const advertisedValidate = new Ajv2020({ strict: false }).compile(
+      advertised,
+    );
+    expect(canonicalValidate({ value: "" })).toBe(true);
+    expect(canonicalValidate({ value: "route" })).toBe(false);
+    expect(advertisedValidate({ value: "" })).toBe(true);
+    expect(advertisedValidate({ value: "route" })).toBe(true);
+    expect(advertised.properties).toEqual({ value: { type: "string" } });
+  });
+
+  it("widens an enum that contains an empty member", () => {
+    const canonical = {
+      type: "object",
+      properties: { value: { type: "string", enum: ["", "exact"] } },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.properties).toEqual({ value: { type: "string" } });
+  });
+
+  it("preserves every enum member type when widening a mixed enum", () => {
+    const canonical = {
+      type: "object",
+      properties: { value: { enum: ["", 1] } },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    const canonicalValidate = new Ajv2020({ strict: false }).compile(canonical);
+    const advertisedValidate = new Ajv2020({ strict: false }).compile(
+      advertised,
+    );
+    expect(canonicalValidate({ value: "" })).toBe(true);
+    expect(canonicalValidate({ value: 1 })).toBe(true);
+    expect(advertisedValidate({ value: "" })).toBe(true);
+    expect(advertisedValidate({ value: 1 })).toBe(true);
+    expect(advertised.properties).toEqual({
+      value: { anyOf: [{ type: "string" }, { type: "integer" }] },
+    });
+  });
+
+  it("drops a negative group that references a widened definition", () => {
+    const canonical = {
+      $defs: { empty: { type: "string", const: "" } },
+      type: "object",
+      properties: { value: { not: { $ref: "#/$defs/empty" } } },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    const canonicalValidate = new Ajv2020({ strict: false }).compile(canonical);
+    const advertisedValidate = new Ajv2020({ strict: false }).compile(
+      advertised,
+    );
+    expect(canonicalValidate({ value: "route" })).toBe(true);
+    expect(canonicalValidate({ value: "" })).toBe(false);
+    expect(advertisedValidate({ value: "route" })).toBe(true);
+    expect(advertised.properties).toEqual({ value: {} });
+    expect(advertised.$defs).toEqual({ empty: { type: "string" } });
+  });
+
+  it("does not recurse forever when a referenced definition is recursive", () => {
+    const canonical = {
+      $defs: {
+        loop: {
+          type: "object",
+          properties: { value: { not: { $ref: "#/$defs/loop" } } },
+        },
+      },
+      type: "object",
+      properties: { guard: { not: { $ref: "#/$defs/loop" } } },
+    };
+    expect(() => presentInputJsonSchema(canonical, () => undefined)).not.toThrow();
+  });
+
+  it("relaxes a oneOf whose branch is a reference to a widened definition", () => {
+    const canonical = {
+      $defs: { empty: { type: "string", const: "" } },
+      type: "object",
+      properties: {
+        value: { oneOf: [{ $ref: "#/$defs/empty" }, { type: "string" }] },
+      },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    const canonicalValidate = new Ajv2020({ strict: false }).compile(canonical);
+    const advertisedValidate = new Ajv2020({ strict: false }).compile(
+      advertised,
+    );
+    expect(canonicalValidate({ value: "route" })).toBe(true);
+    expect(advertisedValidate({ value: "route" })).toBe(true);
+    expect(advertised).toHaveProperty(["properties", "value", "anyOf"]);
+    expect(advertised).not.toHaveProperty(["properties", "value", "oneOf"]);
+  });
+
+  it("resolves array-indexed references before keeping a negative constraint", () => {
+    const canonical = {
+      $defs: { group: { anyOf: [{ type: "string", const: "" }] } },
+      type: "object",
+      properties: { value: { not: { $ref: "#/$defs/group/anyOf/0" } } },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.properties).toEqual({ value: {} });
+    expect(advertised.$defs).toEqual({
+      group: { anyOf: [{ type: "string" }] },
+    });
+  });
+
+  it("drops an affected contains group that references a widened definition", () => {
+    const canonical = {
+      $defs: { empty: { type: "string", const: "" } },
+      type: "object",
+      properties: {
+        values: {
+          type: "array",
+          contains: { $ref: "#/$defs/empty" },
+          maxContains: 1,
+        },
+      },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    const canonicalValidate = new Ajv2020({ strict: false }).compile(canonical);
+    const advertisedValidate = new Ajv2020({ strict: false }).compile(
+      advertised,
+    );
+    expect(canonicalValidate({ values: ["", "a"] })).toBe(true);
+    expect(advertisedValidate({ values: ["", "a"] })).toBe(true);
+    expect(advertised.properties).toEqual({ values: { type: "array" } });
+  });
+
+  it("skips references inside literal metadata", () => {
+    const canonical = {
+      type: "object",
+      properties: { value: { $ref: "#/payload" } },
+      payload: { type: "string", const: "" },
+      default: { $ref: "#/default/payload", payload: { const: "" } },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.payload).toEqual({ type: "string" });
+    expect(advertised.default).toEqual(canonical.default);
+  });
+
+  it("inspects siblings after following a reference", () => {
+    const canonical = {
+      $defs: {
+        string: { type: "string" },
+        empty: { type: "string", const: "" },
+      },
+      type: "object",
+      properties: {
+        value: {
+          not: { $ref: "#/$defs/string", allOf: [{ $ref: "#/$defs/empty" }] },
+        },
+      },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.properties).toEqual({ value: {} });
+  });
+
+  it("computes reference changes before rewriting targets", () => {
+    const canonical = {
+      type: "object",
+      properties: { a: { $ref: "#/empty" }, b: { $ref: "#/wrapper" } },
+      empty: { type: "string", const: "" },
+      wrapper: { not: { $ref: "#/empty" } },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.empty).toEqual({ type: "string" });
+    expect(advertised.wrapper).toEqual({});
+    expect(canonical.wrapper).toEqual({ not: { $ref: "#/empty" } });
+  });
+
+  it("resolves same-resource anchor fragments", () => {
+    const canonical = {
+      $defs: { empty: { $anchor: "empty", type: "string", const: "" } },
+      type: "object",
+      properties: { value: { not: { $ref: "#empty" } } },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.properties).toEqual({ value: {} });
+    expect(advertised.$defs).toEqual({
+      empty: { $anchor: "empty", type: "string" },
+    });
+  });
+
+  it("relaxes unevaluated guards when discarding conditionals", () => {
+    const canonical = {
+      type: "object",
+      properties: {
+        kind: { type: "string" },
+        extra: { type: "integer" },
+      },
+      required: ["kind"],
+      if: { properties: { kind: { const: "" } }, required: ["kind"] },
+      then: { properties: { extra: true } },
+      unevaluatedProperties: false,
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.if).toBeUndefined();
+    expect(advertised.unevaluatedProperties).toBeUndefined();
+  });
+
+  it("preserves descriptions when replacing referenced targets", () => {
+    const canonical = {
+      type: "object",
+      properties: {
+        path: { type: "string", const: "" },
+        alias: { $ref: "#/properties/path" },
+      },
+      required: ["path"],
+    };
+    const advertised = presentInputJsonSchema(
+      canonical,
+      (property) => (property === "path" ? "The path." : undefined),
+    );
+    expect(advertised.properties.path).toEqual({
+      type: "string",
+      description: "The path.",
+    });
+    expect(advertised.properties.alias).toEqual({ $ref: "#/properties/path" });
+  });
+
+  it("discards descendant writes removed by an ancestor replacement", () => {
+    const canonical = {
+      type: "object",
+      properties: {
+        parent: { $ref: "#/default" },
+        child: { $ref: "#/default/not" },
+      },
+      default: { not: { const: "" } },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.default).toEqual({});
+    expect(advertised.properties.child).toEqual({ type: "string" });
+  });
+
+  it("does not treat schema-map entries named $id as resource boundaries", () => {
+    const canonical = {
+      $defs: { $id: { type: "number" }, empty: { const: "" } },
+      type: "object",
+      properties: { value: { not: { $ref: "#/$defs/empty" } } },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.properties).toEqual({ value: {} });
+    expect(advertised.$defs).toEqual({
+      $id: { type: "number" },
+      empty: { type: "string" },
+    });
+  });
+
+  it("keeps inline replacements within their resource", () => {
+    const canonical = {
+      type: "object",
+      properties: {
+        guard: { not: { const: "" } },
+        value: { $ref: "#/properties/guard/not" },
+        nested: {
+          $id: "https://example.com/nested",
+          type: "object",
+          properties: {
+            guard: { not: { type: "number" } },
+            value: { $ref: "#/properties/guard/not" },
+          },
+        },
+      },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.properties.value).toEqual({ type: "string" });
+    expect(advertised.properties.nested.properties.value).toEqual({
+      $ref: "#/properties/guard/not",
+    });
+  });
+
+  it("parks relocated targets in their owning resource", () => {
+    const canonical = {
+      type: "object",
+      properties: {
+        inner: {
+          $id: "https://example.com/inner",
+          type: "object",
+          properties: {
+            guard: {
+              not: {
+                allOf: [{ $id: "https://example.com/r2", type: "object" }],
+                const: "",
+              },
+            },
+            value: { $ref: "#/properties/guard/not" },
+          },
+        },
+      },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    const inner = advertised.properties.inner as Record<string, unknown>;
+    expect(inner.properties).toEqual({
+      guard: {},
+      value: { $ref: "#/$defs/advertisedRelocated0" },
+    });
+    const defs = inner.$defs as Record<string, unknown>;
+    expect(defs.advertisedRelocated0).toBeDefined();
+    expect(
+      JSON.stringify(advertised).split("https://example.com/r2").length - 1,
+    ).toBe(1);
+  });
+
+  it("ignores reference siblings when the schema declares draft-07", () => {
+    const canonical = {
+      $schema: "http://json-schema.org/draft-07/schema#",
+      type: "object",
+      properties: {
+        guard: { not: { const: "" } },
+        value: { $ref: "#/properties/guard/not", type: "number" },
+      },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.properties.value).toEqual({ type: "string" });
+  });
+
+  it("does not walk parked definitions maps as schemas", () => {
+    const canonical = {
+      type: "object",
+      properties: {
+        guard: {
+          not: {
+            allOf: [{ $id: "https://example.com/r", type: "object" }],
+            const: "",
+          },
+        },
+        a: { $ref: "#/properties/guard/not" },
+      },
+      $defs: {
+        items: { $ref: "#/properties/guard/not" },
+      },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    const defs = advertised.$defs as Record<string, unknown>;
+    // Definition-name entries keep their reference shape, retargeted at the
+    // parked schema rather than walked as schema keywords.
+    expect(defs.items).toEqual({
+      $ref: expect.stringMatching(/^#\/\$defs\/advertisedRelocated/),
+    });
+    expect(advertised.properties.a).toEqual({
+      $ref: expect.stringMatching(/^#\/\$defs\/advertisedRelocated/),
+    });
+  });
+
+  it("parks cyclic removed reference groups", () => {
+    const canonical = {
+      type: "object",
+      properties: {
+        guardA: {
+          not: { allOf: [{ $ref: "#/properties/guardB/not" }, { const: "" }] },
+        },
+        guardB: { not: { $ref: "#/properties/guardA/not" } },
+        value: { $ref: "#/properties/guardA/not" },
+      },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    const text = JSON.stringify(advertised);
+    expect(text).not.toContain("#/properties/guardA/not");
+    expect(text).not.toContain("#/properties/guardB/not");
+    const value = advertised.properties.value as Record<string, unknown>;
+    expect(String(value.$ref)).toMatch(/^#\/\$defs\/advertisedRelocated\d+$/);
+    const defs = advertised.$defs as Record<string, unknown>;
+    expect(Object.keys(defs).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("substitutes dangling references inside inlined targets", () => {
+    const canonical = {
+      type: "object",
+      properties: {
+        guardA: { not: { allOf: [{ $ref: "#/properties/guardB/not" }] } },
+        guardB: { not: { const: "" } },
+        value: { $ref: "#/properties/guardA/not" },
+      },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.properties.guardA).toEqual({});
+    expect(advertised.properties.guardB).toEqual({});
+    expect(advertised.properties.value).toEqual({
+      allOf: [{ type: "string" }],
+    });
+  });
+
+  it("rewrites dangling refs inside executable annotation targets", () => {
+    const canonical = {
+      type: "object",
+      properties: {
+        guard: { not: { const: "" } },
+        value: { $ref: "#/default" },
+      },
+      default: { $ref: "#/properties/guard/not" },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.properties.guard).toEqual({});
+    expect(advertised.default).toEqual({ type: "string" });
+  });
+
+  it("switches resource scope for singular schema children", () => {
+    const canonical = {
+      type: "object",
+      properties: {
+        values: {
+          type: "array",
+          items: {
+            $id: "https://example.com/items",
+            type: "object",
+            properties: {
+              guard: { not: { const: "" } },
+              value: { $ref: "#/properties/guard/not" },
+            },
+          },
+        },
+      },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    const items = advertised.properties.values.items as Record<
+      string,
+      unknown
+    >;
+    expect(items.properties).toEqual({
+      guard: {},
+      value: { type: "string" },
+    });
+  });
+
+  it("scopes cycle guards to their schema resource", () => {
+    const canonical = {
+      type: "object",
+      properties: { value: { $ref: "#/default" } },
+      default: {
+        type: "object",
+        properties: {
+          inner: {
+            $id: "https://example.com/inner",
+            type: "object",
+            properties: { flag: { not: { $ref: "#/default" } } },
+            default: { type: "string", const: "" },
+          },
+        },
+      },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    const inner = (
+      (advertised.default as Record<string, unknown>)
+        .properties as Record<string, unknown>
+    ).inner as Record<string, unknown>;
+    expect(inner.properties).toEqual({ flag: {} });
+    expect(inner.default).toEqual({ type: "string" });
+  });
+
+  it("rebases references when a target starts a nested resource", () => {
+    const canonical = {
+      $defs: {
+        nested: {
+          $id: "https://example.com/nested",
+          type: "object",
+          properties: { value: { $ref: "#/default" } },
+          default: { type: "string", const: "" },
+        },
+      },
+      type: "object",
+      properties: { holder: { $ref: "#/$defs/nested" } },
+      default: { const: "" },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.default).toEqual({ const: "" });
+    expect(advertised.$defs.nested.default).toEqual({ type: "string" });
+  });
+
+  it("keeps inlined schema resources unique", () => {
+    const canonical = {
+      type: "object",
+      properties: {
+        guard: {
+          not: { allOf: [{ $id: "https://example.com/r", type: "object" }], const: "" },
+        },
+        a: { $ref: "#/properties/guard/not" },
+        b: { $ref: "#/properties/guard/not" },
+      },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.properties.a).toEqual({
+      $ref: "#/$defs/advertisedRelocated0",
+    });
+    expect(advertised.properties.b).toEqual({
+      $ref: "#/$defs/advertisedRelocated0",
+    });
+    expect(
+      JSON.stringify(advertised).split("https://example.com/r").length - 1,
+    ).toBe(1);
+  });
+
+  it("normalizes nested targets against their owning resource", () => {
+    const canonical = {
+      type: "object",
+      properties: {
+        nested: {
+          $id: "https://example.com/nested",
+          type: "object",
+          properties: { value: { $ref: "#/default" } },
+          default: { not: { $ref: "#/payload" } },
+          payload: { const: "" },
+        },
+      },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.properties.nested.default).toEqual({});
+    expect(advertised.properties.nested.payload).toEqual({ type: "string" });
+  });
+
+  it("resolves annotation references within nested resources", () => {
+    const canonical = {
+      type: "object",
+      properties: {
+        nested: {
+          $id: "https://example.com/nested",
+          type: "object",
+          properties: { value: { $ref: "#/default" } },
+          default: { type: "string", const: "" },
+        },
+      },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.properties.nested.default).toEqual({ type: "string" });
+  });
+
+  it("composes inlined targets with reference siblings", () => {
+    const canonical = {
+      type: "object",
+      properties: {
+        guard: { not: { const: "" } },
+        value: { $ref: "#/properties/guard/not" },
+      },
+      required: ["guard"],
+    };
+    const advertised = presentInputJsonSchema(
+      canonical,
+      (property) => (property === "value" ? "The value." : undefined),
+    );
+    expect(advertised.properties.value).toEqual({
+      description: "The value.",
+      allOf: [{ type: "string" }],
+    });
+  });
+
+  it("inlines removed targets at their callers", () => {
+    const canonical = {
+      type: "object",
+      properties: {
+        guard: { not: { const: "" } },
+        value: { $ref: "#/properties/guard/not" },
+      },
+      required: ["guard"],
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.properties.guard).toEqual({});
+    expect(advertised.properties.value).toEqual({ type: "string" });
+  });
+
+  it("resolves nested references against their own resource root", () => {
+    const canonical = {
+      $defs: { empty: { type: "string", const: "" } },
+      type: "object",
+      properties: {
+        nested: {
+          $id: "https://example.com/nested",
+          type: "object",
+          $defs: { empty: { type: "string", const: "" } },
+          properties: { value: { not: { $ref: "#/$defs/empty" } } },
+        },
+      },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.properties.nested.properties.value).toEqual({});
+    expect(advertised.properties.nested.$defs).toEqual({
+      empty: { type: "string" },
+    });
+  });
+
+  it("widens empty-string literals under contentSchema", () => {
+    const canonical = {
+      type: "object",
+      properties: {
+        value: { type: "string", contentSchema: { const: "" } },
+      },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.properties.value).toEqual({
+      type: "string",
+      contentSchema: { type: "string" },
+    });
+  });
+
+  it("composes overlapping parent and child reference writes", () => {
+    const canonical = {
+      type: "object",
+      properties: {
+        a: { $ref: "#/default/payload" },
+        b: { $ref: "#/default" },
+      },
+      default: { const: "", payload: { const: "" } },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.default).toEqual({
+      type: "string",
+      payload: { type: "string" },
+    });
+  });
+
+  it("resolves plain-name fragments to dynamic anchors", () => {
+    const canonical = {
+      $defs: { empty: { $dynamicAnchor: "empty", type: "string", const: "" } },
+      type: "object",
+      properties: { value: { not: { $ref: "#empty" } } },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.properties).toEqual({ value: {} });
+    expect(advertised.$defs).toEqual({
+      empty: { $dynamicAnchor: "empty", type: "string" },
+    });
+  });
+
+  it("does not resolve references across nested resource boundaries", () => {
+    const canonical = {
+      $defs: { empty: { type: "string", const: "" } },
+      type: "object",
+      properties: {
+        nested: {
+          $id: "https://example.com/nested",
+          type: "object",
+          properties: { value: { not: { $ref: "#/$defs/empty" } } },
+        },
+      },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.$defs).toEqual({ empty: { type: "string" } });
+    expect(advertised.properties.nested.$id).toBe("https://example.com/nested");
+    expect(advertised.properties.nested.properties.value).toEqual({
+      not: { $ref: "#/$defs/empty" },
+    });
+  });
+
+  it("decodes pointer separators before splitting reference tokens", () => {
+    const canonical = {
+      $defs: { empty: { type: "string", const: "" } },
+      type: "object",
+      properties: { value: { not: { $ref: "#/$defs%2Fempty" } } },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.properties).toEqual({ value: {} });
+    expect(advertised.$defs).toEqual({ empty: { type: "string" } });
+  });
+
+  it("normalizes targets of positive local references", () => {
+    const canonical = {
+      type: "object",
+      properties: { value: { $ref: "#/default" } },
+      default: { type: "string", const: "" },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.properties).toEqual({ value: { $ref: "#/default" } });
+    expect(advertised.default).toEqual({ type: "string" });
+    expect(canonical.default).toEqual({ type: "string", const: "" });
+  });
+
+  it("decodes URI fragment tokens in local references", () => {
+    const canonical = {
+      $defs: { "a b": { type: "string", const: "" } },
+      type: "object",
+      properties: { value: { not: { $ref: "#/$defs/a%20b" } } },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(advertised.properties).toEqual({ value: {} });
+    expect(advertised.$defs).toEqual({ "a b": { type: "string" } });
+  });
+
+  it("widens an affected oneOf to anyOf without losing branch guidance", () => {
+    const canonical = {
+      type: "object",
+      properties: {
+        value: {
+          oneOf: [{ type: "string", const: "" }, {}],
+        },
+      },
+    };
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    const canonicalValidate = new Ajv2020({ strict: false }).compile(canonical);
+    const advertisedValidate = new Ajv2020({ strict: false }).compile(
+      advertised,
+    );
+    expect(canonicalValidate({ value: "route" })).toBe(true);
+    expect(advertisedValidate({ value: "route" })).toBe(true);
+    expect(advertised).toHaveProperty(["properties", "value", "anyOf"]);
+  });
+
+  it("removes the recorded trace seed's empty-string literals from the advertisement", () => {
+    const canonical = z.toJSONSchema(
+      z.strictObject({ seed: applicationFeatureSeedSchema }),
+      { io: "input", target: "draft-2020-12" },
+    );
+    const advertised = presentInputJsonSchema(canonical, () => undefined);
+    expect(JSON.stringify(advertised)).not.toContain('"const":""');
+    const canonicalValidate = new Ajv2020({ strict: false }).compile(canonical);
+    const advertisedValidate = new Ajv2020({ strict: false }).compile(
+      advertised,
+    );
+    const emptyRoute = { kind: "route", value: "", match: "exact" };
+    expect(canonicalValidate({ seed: emptyRoute })).toBe(true);
+    expect(advertisedValidate({ seed: emptyRoute })).toBe(true);
+    expect(
+      canonicalValidate({ seed: { kind: "route", value: "", match: "contains" } }),
+    ).toBe(false);
   });
 });
