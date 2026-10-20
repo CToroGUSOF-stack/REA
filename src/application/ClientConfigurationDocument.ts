@@ -57,8 +57,68 @@ export interface ClientConfigurationDocument {
    */
   readonly legacyServers: Record<string, unknown>;
 }
-
 const objectSchema = z.record(z.string(), z.unknown());
+export const codexApprovalModeSchema = z.enum([
+  "approve",
+  "prompt",
+  "auto",
+  "writes",
+]);
+export const codexToolOutputTokenLimitSchema = z.union([
+  z.number().int().positive(),
+  z.bigint().positive(),
+]);
+
+const tomlFloatProperties = new WeakMap<object, ReadonlySet<string>>();
+
+/** Whether a parsed TOML table property was written as a float literal (such as `1.0` or `1e3`). */
+export const hasTomlFloatProperty = (value: object, key: string): boolean =>
+  tomlFloatProperties.get(value)?.has(key) === true;
+
+const codexServerToolObjectSchema = z
+  .object({
+    approval_mode: codexApprovalModeSchema.optional(),
+    output_token_limit: codexToolOutputTokenLimitSchema.optional(),
+  })
+  .passthrough();
+
+const codexServerToolSequenceSchema = z
+  .unknown()
+  .refine((seq) => Array.isArray(seq) && !hasTomlFloatProperty(seq, "1"), {
+    message: "Expected output_token_limit to be a TOML integer",
+    path: [1],
+  })
+  .pipe(
+    z.union([
+      z.tuple([codexApprovalModeSchema]),
+      z.tuple([codexApprovalModeSchema, codexToolOutputTokenLimitSchema]),
+    ]),
+  );
+
+/** Codex per-tool configuration entry (`[mcp_servers.<server>.tools.<tool>]`). */
+export const codexServerToolSchema = z.union([
+  z
+    .unknown()
+    .refine(
+      (tool) =>
+        typeof tool === "object" &&
+        tool !== null &&
+        !Array.isArray(tool) &&
+        !hasTomlFloatProperty(tool, "output_token_limit"),
+      {
+        message: "Expected output_token_limit to be a TOML integer",
+        path: ["output_token_limit"],
+      },
+    )
+    .pipe(codexServerToolObjectSchema),
+  codexServerToolSequenceSchema,
+]);
+
+/** Codex per-tool configuration table (`[mcp_servers.<server>.tools.<tool>]`). */
+export const codexServerToolsSchema = z.record(
+  z.string(),
+  codexServerToolSchema,
+);
 
 /** Compare parsed configuration values without depending on parser prototypes. */
 export const clientConfigurationValuesEqual = (
@@ -71,6 +131,29 @@ export const clientConfigurationValuesEqual = (
   );
 
 const normalizeConfigurationValue = (value: unknown): unknown => {
+  if (
+    Array.isArray(value) &&
+    value.length >= 1 &&
+    value.length <= 2 &&
+    typeof value[0] === "string" &&
+    codexApprovalModeSchema.safeParse(value[0]).success &&
+    (value.length === 1 ||
+      (typeof value[1] === "number" && !hasTomlFloatProperty(value, "1")) ||
+      typeof value[1] === "bigint")
+  ) {
+    const parsedLimit =
+      value.length === 2
+        ? codexToolOutputTokenLimitSchema.safeParse(value[1])
+        : undefined;
+    if (value.length === 1 || parsedLimit?.success) {
+      return normalizeConfigurationValue({
+        approval_mode: value[0],
+        ...(parsedLimit?.success
+          ? { output_token_limit: parsedLimit.data }
+          : {}),
+      });
+    }
+  }
   if (Array.isArray(value)) return value.map(normalizeConfigurationValue);
   if (typeof value !== "object" || value === null || value instanceof Date)
     return value;
@@ -109,28 +192,64 @@ const isEmptyClientConfigurationText = (text: string): boolean =>
 
 const INT64_MIN = -(2n ** 63n);
 const INT64_MAX = 2n ** 63n - 1n;
+const SAFE_INT_MIN = BigInt(Number.MIN_SAFE_INTEGER);
+const SAFE_INT_MAX = BigInt(Number.MAX_SAFE_INTEGER);
+
+const normalizeTomlInteger = (value: bigint): number | bigint => {
+  if (value < INT64_MIN || value > INT64_MAX)
+    throw new SyntaxError(
+      `Invalid TOML document: integer ${String(value)} is outside the signed 64-bit range`,
+    );
+  return value >= SAFE_INT_MIN && value <= SAFE_INT_MAX ? Number(value) : value;
+};
 
 /**
- * Parse client TOML with TOML 1.0's signed 64-bit integer contract. Integers
- * beyond JavaScript's safe range stay exact as bigint; values outside Int64,
- * which Codex rejects, are malformed.
+ * Parse client TOML with TOML 1.0's signed 64-bit integer contract. Safe
+ * integers normalize to `number`, integers beyond JavaScript's safe range stay
+ * exact as `bigint`, and TOML float properties (including integral floats like
+ * `1.0` or `1e3`) are recorded before safe-integer normalization.
  */
 const parseClientToml = (text: string): Record<string, unknown> => {
-  const parsed = parseToml(text, { integersAsBigInt: "asNeeded" });
+  const parsed = parseToml(text, { integersAsBigInt: true });
   const pending: unknown[] = [parsed];
   for (let value = pending.pop(); value !== undefined; value = pending.pop()) {
-    if (typeof value === "bigint") {
-      if (value < INT64_MIN || value > INT64_MAX)
-        throw new SyntaxError(
-          `Invalid TOML document: integer ${String(value)} is outside the signed 64-bit range`,
-        );
+    if (Array.isArray(value)) {
+      const floatKeys = new Set<string>();
+      for (let index = 0; index < value.length; index += 1) {
+        const element: unknown = value[index];
+        if (typeof element === "bigint") {
+          value[index] = normalizeTomlInteger(element);
+        } else if (typeof element === "number") {
+          floatKeys.add(String(index));
+        } else if (
+          typeof element === "object" &&
+          element !== null &&
+          !(element instanceof Date)
+        )
+          pending.push(element);
+      }
+      if (floatKeys.size > 0) tomlFloatProperties.set(value, floatKeys);
     } else if (
       typeof value === "object" &&
       value !== null &&
       !(value instanceof Date)
-    )
-      // Large documents can exceed argument limits, so do not spread.
-      for (const nested of Object.values(value)) pending.push(nested);
+    ) {
+      const record = value as Record<string, unknown>;
+      const floatKeys = new Set<string>();
+      for (const [key, nested] of Object.entries(record)) {
+        if (typeof nested === "bigint") {
+          record[key] = normalizeTomlInteger(nested);
+        } else if (typeof nested === "number") {
+          floatKeys.add(key);
+        } else if (
+          typeof nested === "object" &&
+          nested !== null &&
+          !(nested instanceof Date)
+        )
+          pending.push(nested);
+      }
+      if (floatKeys.size > 0) tomlFloatProperties.set(record, floatKeys);
+    }
   }
   return parsed;
 };

@@ -12,6 +12,9 @@ import {
   clientConfigurationValuesEqual,
   clientServerListedDisabled,
   clientServerPath,
+  codexApprovalModeSchema,
+  codexToolOutputTokenLimitSchema,
+  hasTomlFloatProperty,
   legacyClientServerPath,
   OMP_DISABLED_SERVERS_KEY,
   parseClientConfiguration,
@@ -775,6 +778,12 @@ const clientConfigurationDesired = (
     registrationEnvironment,
   );
   const previous = parsed?.servers[PRODUCT_IDENTITY.mcpServerKey];
+  const previousCodexTools =
+    client.name === "codex" ? codexTools(previous) : undefined;
+  const previousCodexDefaultToolsApprovalMode =
+    client.name === "codex"
+      ? codexDefaultToolsApprovalMode(previous)
+      : undefined;
   if (
     client.name === "kimi" &&
     typeof previous === "object" &&
@@ -798,6 +807,15 @@ const clientConfigurationDesired = (
           tool_timeout_sec:
             positiveTimeout(previous, "tool_timeout_sec") ??
             recommendedMcpToolTimeoutSeconds(validated.value.timeoutInputs),
+          ...(previousCodexDefaultToolsApprovalMode === undefined
+            ? {}
+            : {
+                default_tools_approval_mode:
+                  previousCodexDefaultToolsApprovalMode,
+              }),
+          ...(previousCodexTools === undefined
+            ? {}
+            : { tools: previousCodexTools }),
         }
       : {}),
     ...(client.name === "kimi"
@@ -811,6 +829,98 @@ const clientConfigurationDesired = (
         }
       : {}),
   };
+};
+
+const codexToolEntry = (
+  value: unknown,
+): Record<string, unknown> | undefined => {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    if (value.length < 1 || value.length > 2) return undefined;
+    const [rawApproval, rawLimit] = value;
+    const entry: Record<string, unknown> = {};
+    const parsedApproval = codexApprovalModeSchema.safeParse(rawApproval);
+    if (parsedApproval.success) {
+      entry.approval_mode = parsedApproval.data;
+    }
+    if (rawLimit !== undefined && !hasTomlFloatProperty(value, "1")) {
+      const parsedLimit = codexToolOutputTokenLimitSchema.safeParse(rawLimit);
+      if (parsedLimit.success) {
+        entry.output_token_limit = parsedLimit.data;
+      }
+    }
+    return Object.keys(entry).length > 0 ? entry : undefined;
+  }
+  const rawEntries = Object.entries(value);
+  if (rawEntries.length === 0) {
+    return {};
+  }
+  const entry: Record<string, unknown> = {};
+  for (const [key, prop] of rawEntries) {
+    if (key === "approval_mode") {
+      const parsedApproval = codexApprovalModeSchema.safeParse(prop);
+      if (parsedApproval.success) {
+        entry[key] = parsedApproval.data;
+      }
+    } else if (key === "output_token_limit") {
+      if (!hasTomlFloatProperty(value, key)) {
+        const parsedLimit = codexToolOutputTokenLimitSchema.safeParse(prop);
+        if (parsedLimit.success) {
+          entry[key] = parsedLimit.data;
+        }
+      }
+    } else {
+      entry[key] = prop;
+    }
+  }
+  return Object.keys(entry).length > 0 ? entry : undefined;
+};
+
+const codexTools = (
+  registration: unknown,
+): Record<string, Record<string, unknown>> | undefined => {
+  if (
+    typeof registration !== "object" ||
+    registration === null ||
+    !Object.hasOwn(registration, "tools")
+  )
+    return undefined;
+  const rawTools: unknown = Reflect.get(registration, "tools");
+  if (
+    typeof rawTools !== "object" ||
+    rawTools === null ||
+    Array.isArray(rawTools)
+  )
+    return undefined;
+  const rawEntries = Object.entries(rawTools);
+  if (rawEntries.length === 0) {
+    return {};
+  }
+  const validTools: Record<string, Record<string, unknown>> = {};
+  for (const [toolName, toolConfig] of rawEntries) {
+    const entry = codexToolEntry(toolConfig);
+    if (entry !== undefined) {
+      validTools[toolName] = entry;
+    }
+  }
+  return Object.keys(validTools).length > 0 ? validTools : undefined;
+};
+
+const codexDefaultToolsApprovalMode = (
+  registration: unknown,
+): string | undefined => {
+  if (
+    typeof registration !== "object" ||
+    registration === null ||
+    !Object.hasOwn(registration, "default_tools_approval_mode")
+  )
+    return undefined;
+  const parsed = codexApprovalModeSchema.safeParse(
+    Reflect.get(registration, "default_tools_approval_mode"),
+  );
+  return parsed.success ? parsed.data : undefined;
 };
 
 const positiveTimeout = (
