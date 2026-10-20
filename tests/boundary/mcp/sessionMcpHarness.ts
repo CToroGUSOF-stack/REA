@@ -128,7 +128,15 @@ export const snapshotAndRecordUnknown = async (
   const bundle = evidenceBundleSchema.parse(
     JSON.parse(await readFile(evidencePath, "utf8")),
   );
-  expect(bundle.records).toHaveLength(1);
+  // Admitting the target records exactly one deterministic selection decision
+  // beside the provider observations; the exact totals below stay derived so
+  // neither record kind is hard-coded away.
+  const selectionRecords = bundle.records.filter(
+    ({ predicate_type: predicate }) => predicate === "rea.provider-selection",
+  );
+  expect(selectionRecords).toHaveLength(1);
+  expect(bundle.records.length).toBeGreaterThan(selectionRecords.length);
+  const totalRecords = bundle.records.length;
   expect(
     structured(
       await mcp.callTool({
@@ -136,7 +144,7 @@ export const snapshotAndRecordUnknown = async (
         arguments: { path: evidencePath },
       }),
     ).result,
-  ).toEqual({ imported: 0, unknowns_added: 0, total: 1 });
+  ).toEqual({ imported: 0, unknowns_added: 0, total: totalRecords });
   const externalEvidencePath = join(root, "external-evidence.json");
   await writeFile(
     externalEvidencePath,
@@ -157,7 +165,11 @@ export const snapshotAndRecordUnknown = async (
         arguments: { path: externalEvidencePath },
       }),
     ).result,
-  ).toEqual({ imported: 1, unknowns_added: 0, total: 2 });
+  ).toEqual({
+    imported: 1,
+    unknowns_added: 0,
+    total: totalRecords + 1,
+  });
   const recordedUnknown = z
     .object({
       result: z.object({ unknown_id: z.string(), revision: z.number() }),

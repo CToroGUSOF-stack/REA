@@ -208,15 +208,21 @@ describe("inspection without deep binding", () => {
     });
   });
 
-  it("preserves ordinary ambiguity when auxiliary inspection does not cover the target", async () => {
+  it("reports a selection-required state when auxiliary inspection does not cover the target", async () => {
     const registry = new AnalysisProviderRegistry(
       [candidate("alpha").provider, candidate("beta").provider],
       "auto",
       () => false,
     );
+    // Two eligible providers: the target is admitted without a binding and the
+    // tie is reported as a pending choice rather than rejected as ambiguity.
     expect(await registry.select(DATABASE_TARGET)).toMatchObject({
-      ok: false,
-      error: { reason: "ambiguous" },
+      ok: true,
+      value: {
+        selectionState: "selection_required",
+        binding: null,
+        requestedProviderId: "auto",
+      },
     });
     const controller = new AbortController();
     controller.abort();
@@ -453,6 +459,229 @@ describe("analysis provider registry: profile and cleanup failures", () => {
       finish?.();
       await Promise.all([selecting, closing]);
     }
+  });
+});
+
+describe("analysis provider registry: agent-driven selection", () => {
+  it("admits a target for explicit selection when two providers are eligible", async () => {
+    // Registration order must not affect the admitted state or the reporting.
+    for (const providers of [
+      [candidate("beta"), candidate("alpha")],
+      [candidate("alpha"), candidate("beta")],
+    ]) {
+      const registry = new AnalysisProviderRegistry(
+        providers.map(({ provider }) => provider),
+      );
+      const selected = await registry.select(DATABASE_TARGET);
+      expect(selected).toMatchObject({
+        ok: true,
+        value: {
+          requestedProviderId: "auto",
+          binding: null,
+          selectionState: "selection_required",
+          candidates: [
+            {
+              provider: { id: "alpha" },
+              eligibility: "eligible",
+              selected: false,
+            },
+            {
+              provider: { id: "beta" },
+              eligibility: "eligible",
+              selected: false,
+            },
+          ],
+        },
+      });
+      for (const { created } of providers) expect(created).toEqual([]);
+    }
+  });
+
+  it("treats three eligible candidates as selection-required with stable ordering", async () => {
+    const registry = new AnalysisProviderRegistry(
+      ["gamma", "alpha", "beta"].map((id) => candidate(id).provider),
+    );
+    const selected = await registry.select(DATABASE_TARGET);
+    if (!selected.ok) throw selected.error;
+    expect(selected.value.selectionState).toBe("selection_required");
+    expect(selected.value.binding).toBeNull();
+    expect(
+      selected.value.candidates.map(({ provider }) => provider.id),
+    ).toEqual(["alpha", "beta", "gamma"]);
+    expect(
+      selected.value.candidates.map(({ eligibility }) => eligibility),
+    ).toEqual(["eligible", "eligible", "eligible"]);
+  });
+
+  it("keeps an available but target-incompatible provider unbound", async () => {
+    const alpha = candidate("alpha");
+    const registry = new AnalysisProviderRegistry([alpha.provider]);
+    const selected = await registry.select(ARTIFACT_TARGET);
+    if (!selected.ok) throw selected.error;
+    expect(selected.value).toMatchObject({
+      selectionState: "unbound",
+      binding: null,
+      candidates: [
+        {
+          eligibility: "ineligible",
+          targetSupport: {
+            status: "unsupported",
+            code: "target_kind_unsupported",
+          },
+        },
+      ],
+    });
+    expect(alpha.created).toEqual([]);
+
+    const operation = registry.unboundOperationError(
+      "address_name",
+      selected.value,
+    );
+    expect(operation).toMatchObject({
+      reason: "target_unsupported",
+      operation: "address_name",
+      candidateIds: ["alpha"],
+    });
+  });
+
+  it("keeps unavailable and unresolvable providers unbound and ineligible", async () => {
+    const unavailable = candidate("alpha", { available: false });
+    const unresolved = candidate("beta", { profile: "missing" });
+    const invalid = candidate("gamma", { profile: "error" });
+    const registry = new AnalysisProviderRegistry([
+      unavailable.provider,
+      unresolved.provider,
+      invalid.provider,
+    ]);
+
+    const selected = await registry.select(DATABASE_TARGET);
+    if (!selected.ok) throw selected.error;
+    expect(selected.value.selectionState).toBe("unbound");
+    expect(selected.value.binding).toBeNull();
+    expect(
+      selected.value.candidates.map(({ provider, eligibility }) => ({
+        id: provider.id,
+        eligibility,
+      })),
+    ).toEqual([
+      { id: "alpha", eligibility: "ineligible" },
+      { id: "beta", eligibility: "ineligible" },
+      { id: "gamma", eligibility: "ineligible" },
+    ]);
+    expect(
+      selected.value.candidates.map(({ availability }) => availability.code),
+    ).toEqual(["runtime_missing", "version_unresolved", "version_unresolved"]);
+    for (const fixture of [unavailable, unresolved, invalid])
+      expect(fixture.created).toEqual([]);
+
+    // A prerequisite or profile failure is not the same as awaiting a choice.
+    expect(
+      registry.unboundOperationError("address_name", selected.value),
+    ).toMatchObject({ reason: "provider_unavailable" });
+  });
+
+  it("reports ambiguous only at the operation boundary before a choice", async () => {
+    const registry = new AnalysisProviderRegistry([
+      candidate("alpha").provider,
+      candidate("beta").provider,
+    ]);
+    const selected = await registry.select(DATABASE_TARGET);
+    if (!selected.ok) throw selected.error;
+
+    const operation = registry.unboundOperationError(
+      "address_name",
+      selected.value,
+    );
+    expect(operation).toMatchObject({
+      _tag: "ProviderSelectionError",
+      reason: "ambiguous",
+      requestedProviderId: "auto",
+      operation: "address_name",
+      candidateIds: ["alpha", "beta"],
+    });
+    expect(operation.userMessage).toContain("Choose one with provider_id");
+  });
+});
+
+describe("analysis provider registry: selection precedence", () => {
+  it("keeps explicit and configured preferences ahead of automatic selection", async () => {
+    const registry = new AnalysisProviderRegistry(
+      [candidate("alpha").provider, candidate("beta").provider],
+      "beta",
+    );
+
+    // An explicit concrete request wins over the configured preference.
+    expect(await registry.select(DATABASE_TARGET, "alpha")).toMatchObject({
+      ok: true,
+      value: {
+        selectionState: "bound",
+        binding: {
+          identity: { id: "alpha" },
+          selectionSource: "request",
+        },
+      },
+    });
+    // The configured preference wins when the request omits a selector.
+    expect(await registry.select(DATABASE_TARGET)).toMatchObject({
+      ok: true,
+      value: {
+        selectionState: "bound",
+        binding: {
+          identity: { id: "beta" },
+          selectionSource: "environment",
+        },
+      },
+    });
+    // An explicit `auto` still asks REA to decide, so it reports the tie.
+    expect(await registry.select(DATABASE_TARGET, "auto")).toMatchObject({
+      ok: true,
+      value: {
+        selectionState: "selection_required",
+        binding: null,
+        requestedProviderId: "auto",
+      },
+    });
+  });
+
+  it("cancels automatic evaluation before admitting a selection-required target", async () => {
+    const alpha = candidate("alpha");
+    const controller = new AbortController();
+    const beta = candidate("beta");
+    const interrupting: AnalysisProviderCandidate = {
+      ...beta.provider,
+      resolveAnalysisProfile: (target, options) => {
+        controller.abort();
+        return beta.provider.resolveAnalysisProfile(target, options);
+      },
+    };
+    const selected = await new AnalysisProviderRegistry([
+      alpha.provider,
+      interrupting,
+    ]).select(DATABASE_TARGET, undefined, { signal: controller.signal });
+
+    expect(selected).toMatchObject({
+      ok: false,
+      error: { _tag: "AnalysisCancelledError", operation: "open_binary" },
+    });
+    expect(alpha.created).toEqual([]);
+    expect(beta.created).toEqual([]);
+  });
+
+  it("rejects unknown and unsupported explicit providers without fallback", async () => {
+    const registry = new AnalysisProviderRegistry([
+      candidate("alpha").provider,
+      candidate("beta").provider,
+    ]);
+    const unknown = await registry.select(DATABASE_TARGET, "missing");
+    expect(unknown).toMatchObject({
+      ok: false,
+      error: { reason: "unknown_provider", operation: "open_binary" },
+    });
+    const unsupported = await registry.select(ARTIFACT_TARGET, "alpha");
+    expect(unsupported).toMatchObject({
+      ok: false,
+      error: { reason: "target_unsupported", operation: "open_binary" },
+    });
   });
 });
 

@@ -104,7 +104,7 @@ export const resolveSessionTarget = async (
   const { router, current, target, options } = input;
   const sameTarget = sameSessionTarget(current?.target, target);
   const resolvedRoute =
-    sameTarget && options.providerId === undefined && current !== undefined
+    sameTarget && current !== undefined && keepsResolvedRoute(current, options)
       ? ({ ok: true, value: current.route } as const)
       : await router.resolve(target, options.providerId, options.signal);
   if (!resolvedRoute.ok) return resolvedRoute;
@@ -113,6 +113,25 @@ export const resolveSessionTarget = async (
     route: resolvedRoute.value,
   });
 };
+
+/**
+ * Decide whether an already-resolved route still answers this request.
+ *
+ * An omitted selector keeps the active route, which preserves the live binding
+ * and its retained snapshot. An explicit `auto` keeps it only when that route
+ * was itself produced by `auto`: re-resolving the same deterministic policy for
+ * unchanged target bytes cannot pick a different engine, and with several
+ * eligible providers it would instead tear down a working binding for a target
+ * the caller already opened. A concrete selector, or an `auto` request against a
+ * concrete binding, always re-resolves.
+ */
+const keepsResolvedRoute = (
+  current: CurrentOpenBinding,
+  options: BinarySessionOpenOptions,
+): boolean =>
+  options.providerId === undefined ||
+  (options.providerId === "auto" &&
+    current.route.selection?.requestedProviderId === "auto");
 
 /** Revalidate a previewed route against the current session and snapshot binding. */
 export const validateResolvedSessionTarget = (

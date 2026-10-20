@@ -453,8 +453,17 @@ The `effects` and `annotations` arrays list the true members of their fixed
 vocabularies. A known member omitted from either array is false. This applies
 only to these closed flag sets; it does not make an omitted tool, provider, mode,
 or limitation false. Keep availability reasons, remediation, client-feature
-requirements, and mode facts inline with the grouped tool names. The optional
-inputs `expected_package_version`, `expected_catalog_digest`, and
+requirements, and mode facts inline with the grouped tool names. `reason`
+distinguishes `provider_missing` (no configured provider declares the operation)
+from `provider_selection_required` (configured and eligible providers exist, but
+the admitted target has no deep binding yet); the latter names the eligible
+provider IDs and tells the caller to select one through `open_binary`. The
+choices it names are resolvable ones: only candidates that declared every
+operation the tool requires are offered, so a provider that is eligible for the
+target but cannot run the requested operation is never recommended for it. When
+no eligible provider declares those operations, the reason stays
+`provider_missing`, because the pending choice is not what blocks the call. The
+optional inputs `expected_package_version`, `expected_catalog_digest`, and
 `expected_server_path` compare the live session with the caller's expectations.
 
 `server_identity.catalog` contains catalog counts and schema digests. Grouped
@@ -478,14 +487,70 @@ discovery. Each candidate's capability sets describe that possible provider;
 they do not select it. The top-level `capabilities` describe the current route,
 while `analysis_provider_binding` identifies the concrete selected route. These
 fields are not interchangeable. Target-free discovery is sorted by provider ID,
-reports host availability and `unknown` target support, and does not create an
-analysis client. `open_binary.provider_id` accepts a concrete provider ID or
-`auto`; it uses the same parser and selection policy as CLI `--provider` and
-`REA_ANALYSIS_PROVIDER`. A successful deep open exposes one immutable provider,
-concrete version, selection source, and complete analysis profile through
-`analysis_provider_binding`. Ambiguity and unknown, unavailable, or unsupported
-choices return typed selection details. A selected provider is never replaced
+reports host availability, `eligibility: "unevaluated"`, and `unknown` target
+support, and does not create an analysis client. `open_binary.provider_id`
+accepts a concrete provider ID or `auto`; it uses the same parser and selection
+policy as CLI `--provider` and `REA_ANALYSIS_PROVIDER`. A successful deep open
+exposes one immutable provider, concrete version, selection source, and complete
+analysis profile through `analysis_provider_binding`.
+
+`binary_session.analysis_provider_selection_state` reports the deterministic
+selection outcome for the reported target. It is `bound` when a deep provider
+was selected, `unbound` when no configured provider is eligible, and
+`selection_required` when two or more are eligible; it is `null` before any
+target is resolved. `analysis_provider_candidates[].eligibility` is `eligible`
+only when host availability, target compatibility, and a resolved
+identity-matched analysis profile all hold for that target, `ineligible` when one
+of those was decided against the provider, and `unevaluated` when REA did not
+resolve that candidate's profile for this selection. `unevaluated` is an
+omission, not a rejection, and only the candidates a selection needs are probed.
+An `eligible` candidate reports the identity its resolved profile committed,
+including the concrete version, and every capability it published carries that
+same identity — so a caller comparing candidates before binding one sees the
+version REA actually resolved rather than the adapter's unresolved declaration.
+
+A `selection_required` target is admitted without a binding and without starting
+an analysis engine. REA holds no provider ranking and does not choose when
+several providers are eligible: the caller selects one by reopening the same
+target with a concrete `provider_id`, which is validated and bound through the
+existing serialized transition. A deep operation attempted before that choice
+returns a typed `ProviderSelectionError` with `selection_reason: "ambiguous"` and
+the candidate IDs, and `tool_availability` reports those operations as
+`provider_selection_required` with the eligible IDs that declare them instead of
+claiming that no provider is installed. Unknown, unavailable, unsupported, or
+unverifiable choices
+return typed selection details, and a selected provider is never replaced
 automatically after a runtime failure.
+
+An omitted `provider_id` keeps the already-resolved route for unchanged target
+bytes. An explicit `provider_id: "auto"` does the same when that route was
+itself produced by `auto`, because re-running the same deterministic policy
+cannot choose differently and would otherwise tear down a working binding for a
+target the caller already opened. A concrete `provider_id`, or an `auto` request
+against a concrete binding, always re-resolves.
+
+Each target admission that resolves a new selection retains one deterministic
+`rea.provider-selection` Evidence record: the objective per-candidate
+availability, target-support, eligibility, and rejection facts; the deterministic
+REA decision (state, rule, selection source, and selected provider); and an
+explicit `caller_rationale: null`, because REA does not record or reconstruct the
+caller's reasoning. `parameters.provider_id` records the selector REA applied for
+this operation — the caller's `provider_id` when supplied, otherwise the
+configured default — so `selection_source` distinguishes a caller choice from a
+configured or automatic one. It is attributed to the REA selection policy with
+`analyst-inference` authority and `derived` confidence rather than the default
+`shipped-artifact`, because it reports REA's own provider decision instead of a
+read of the artifact's contents; that keeps static reconstruction and unknown
+resolution from accepting it as artifact evidence. A reopen that resolves an
+identical selection adds no record, because its Evidence digest already exists.
+A reopen that resolves a _different_ selection for the same live target — asking
+explicitly for the provider automatic selection already bound is the common case —
+records that decision and adopts it, so `analysis_provider_binding.selection_source`
+reports the caller's choice instead of the superseded automatic one while the
+provider client, run ID, and snapshot binding are retained. The record
+carries no analysis profile, is attributed to the
+REA selection policy rather than to an engine, is never registered as a snapshot
+replay binding, and is not duplicated by an equivalent reopen.
 
 Each provider client receives `binary_session.analysis_run.run_id` before any
 provider startup, including clients whose startup fails. `process_lineage` is

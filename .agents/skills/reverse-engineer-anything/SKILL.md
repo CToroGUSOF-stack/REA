@@ -262,6 +262,66 @@ before abandoning deep analysis or repeating the same cold import. The default
 330 seconds is configurable; changing the server's environment requires a new
 REA process.
 
+## Choose a deep provider when more than one is eligible
+
+`binary_session.analysis_provider_selection_state` reports how REA resolved deep
+provider selection for the open target: `bound` (one provider selected),
+`unbound` (no configured provider is eligible), or `selection_required` (two or
+more are eligible). It is `null` before a target is open. Each entry in
+`analysis_provider_candidates` carries `provider` identity and version,
+`availability`, `target_support`, `eligibility`, and its capability groups.
+
+`eligibility` is `eligible`, `ineligible`, or `unevaluated`. An installed engine
+is not automatically eligible; a provider becomes `eligible` only when the host
+availability, target compatibility, and a resolved analysis profile all hold.
+An `eligible` candidate reports the concrete version its profile resolved, and
+its capability groups carry that same version. `unevaluated` means REA did not
+probe that provider for this selection, which is
+an omission rather than a rejection. REA does not rank providers and does not
+know which engine is better for the user's question.
+
+When the state is `selection_required`, no provider is bound and no engine was
+started. Each deep operation then appears in `binary_session`'s
+`tool_availability` as `provider_selection_required`; the eligible provider IDs it
+names are the ones that declared what that operation needs, so use them as a
+starting point rather than the whole candidate list. An operation reported as
+`provider_missing` instead cannot be run by any eligible provider, so selecting
+one will not help. Do not read either reason as a missing installation, because
+the providers are installed, available, and target-compatible. Decide the
+provider yourself:
+
+1. Read the user's requested operations, format, architecture, and any existing
+   provider-specific workflow the request implies.
+2. Compare each candidate's capability groups with those operations. Expand
+   `shared_limitations` plus a group's `limitations` for the exact limitations,
+   and read `effects`, `available`, and `availability_code` before relying on an
+   operation. Prefer the provider that covers the required operations with the
+   fewest relevant limitations, and say which operations drove the choice.
+3. Do not treat availability, version, or popularity as evidence of superior or
+   more complete analysis, and do not tell the user that one engine is "better"
+   without evidence from the analysis itself.
+4. Select explicitly by reopening the same absolute target path with a concrete
+   `provider_id`, for example
+   `{"path": "/absolute/path/to/target", "provider_id": "ghidra"}`.
+5. Verify the binding with `binary_session`: `analysis_provider_binding` must
+   name the chosen provider with its concrete version, `selection_source`, and
+   `analysis_profile`, and `analysis_provider_selection_state` must be `bound`.
+   Only then run the analysis.
+
+A deep analysis call made before a provider is selected fails with a typed
+selection error whose `details.selection_reason` is `ambiguous`. That is not a
+transient failure: select a provider instead of retrying the same call. Reopening
+the same target without `provider_id`, or with `auto` when the current route was
+already resolved by `auto`, keeps the existing route rather than re-deciding; use
+a concrete `provider_id` to change engine. Naming the provider that is already
+bound reuses the live engine without restarting it, and REA still records that
+explicit choice and reports `selection_source: "request"`, so the session never
+keeps claiming the earlier automatic decision. If a
+bound provider fails at runtime, REA returns the original reason and never
+switches engines. Report the failure; if a different engine is warranted, decide
+that explicitly as above rather than retrying blindly. Close the session with
+`close_binary` when the investigation ends.
+
 ## Work summary-first
 
 Start with the default result and use its inline Evidence and graph context.

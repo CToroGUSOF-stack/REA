@@ -11,6 +11,13 @@ export const REA_WORKFLOW_PROVIDER = {
   version: "1",
 } as const;
 
+/** Provider identity for deterministic deep-provider selection decisions. */
+export const PROVIDER_SELECTION_PROVIDER = {
+  id: "rea-provider-selection",
+  name: "REA deep-provider selection policy",
+  version: "1",
+} as const;
+
 /** Commit a workflow result to its upstream profile and applicable semantic revision. */
 export const workflowAnalysisProfile = (
   upstream: AnalysisProfileCommitment,

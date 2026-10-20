@@ -449,10 +449,30 @@ describe("target-free MCP workflow", () => {
       path: snapshotPath,
       primitive_entries: 0,
       workflow_entries: 0,
-      evidence_records: 0,
+      // Closing `second` saves exactly its own target-bound records: the
+      // deterministic selection decision made when it was admitted.
+      evidence_records: 1,
     });
-    expect(JSON.parse(await readFile(snapshotPath, "utf8"))).toMatchObject({
-      evidence_bundle: { records: [], unknowns: [] },
+    const snapshot = z
+      .object({
+        evidence_bundle: z.object({
+          records: z.array(z.record(z.string(), z.unknown())),
+          unknowns: z.array(z.unknown()),
+        }),
+      })
+      .passthrough()
+      .parse(JSON.parse(await readFile(snapshotPath, "utf8")));
+    expect(snapshot.evidence_bundle.unknowns).toEqual([]);
+    expect(snapshot.evidence_bundle.records).toHaveLength(1);
+    expect(snapshot.evidence_bundle.records[0]).toMatchObject({
+      predicate_type: "rea.provider-selection",
+      operation: "open_binary",
+      provider: { id: "rea-provider-selection" },
+      analysis_profile: null,
+      normalized_result: {
+        selection_state: "bound",
+        deterministic_rule: "auto-single-candidate",
+      },
     });
     expect(
       text(await mcp.callTool({ name: "binary_session", arguments: {} })),

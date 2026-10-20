@@ -20,6 +20,44 @@ const bundleResult = (reply: CallToolResult) =>
   z.object({ result: evidenceBundleSchema }).parse(reply.structuredContent)
     .result;
 
+type Bundle = ReturnType<typeof bundleResult>;
+
+const recordsWithPredicate = (bundle: Bundle, predicate: string) =>
+  bundle.records.filter(({ predicate_type: actual }) => actual === predicate);
+
+/**
+ * Assert the exact retained-record composition for one admitted target.
+ *
+ * Admitting `target` records one selection decision attributed to REA's
+ * selection policy; the provider observations and the Unknown mutation history
+ * are unchanged by it. The length is asserted together with each contributing
+ * group so the count stays justified rather than a bare constant.
+ */
+const expectRetainedRecords = (bundle: Bundle, target: string): void => {
+  const selection = recordsWithPredicate(bundle, "rea.provider-selection");
+  expect(selection).toHaveLength(1);
+  expect(selection[0]).toMatchObject({
+    operation: "open_binary",
+    authority: "analyst-inference",
+    confidence: "derived",
+    provider: { id: "rea-provider-selection" },
+    subject: { local_path: target, format: "analysis-database" },
+  });
+  const analysis = recordsWithPredicate(bundle, "rea.analysis");
+  expect(analysis).toHaveLength(1);
+  // The decision describes the same target identity as that target's analysis.
+  expect(selection[0]?.subject?.digest).toEqual(analysis[0]?.subject?.digest);
+  expect(
+    recordsWithPredicate(bundle, "rea.javascript-application-analysis"),
+  ).toHaveLength(1);
+  expect(
+    recordsWithPredicate(bundle, "rea.residual-unknown-mutation"),
+  ).toHaveLength(2);
+  // One selection record plus the four investigation records above.
+  expect(bundle.records).toHaveLength(5);
+  expect(bundle.unknowns).toHaveLength(2);
+};
+
 const successfulTool = async (
   client: Client,
   name: string,
@@ -134,8 +172,7 @@ it.each(["switch", "restart"] as const)(
         .parse(analyzed.structuredContent).evidence_id;
       await recordUnknownHistory(client);
       const before = bundleResult(await call("get_evidence_bundle"));
-      expect(before.records).toHaveLength(4);
-      expect(before.unknowns).toHaveLength(2);
+      expectRetainedRecords(before, first);
 
       cleanupAllowed = false;
       for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -160,7 +197,39 @@ it.each(["switch", "restart"] as const)(
 
       cleanupAllowed = true;
       await call("open_binary", { path: nextTarget });
-      expect(bundleResult(await call("get_evidence_bundle"))).toEqual(before);
+      const recovered = bundleResult(await call("get_evidence_bundle"));
+      if (transition === "restart") {
+        // Restarting the same target resolves the same decision, whose Evidence
+        // identity already exists, so recovery adds no record at all.
+        expect(recovered).toEqual(before);
+      } else {
+        // A successful switch retains every record and adds exactly the new
+        // target's admitting decision, bound to that target.
+        const retainedIds = new Set(
+          before.records.map(({ evidence_id: id }) => id),
+        );
+        expect(
+          recovered.records.filter(({ evidence_id: id }) =>
+            retainedIds.has(id),
+          ),
+        ).toHaveLength(before.records.length);
+        expect(recovered.records).toHaveLength(before.records.length + 1);
+        expect(
+          recovered.records.filter(
+            ({ evidence_id: id }) => !retainedIds.has(id),
+          ),
+        ).toMatchObject([
+          {
+            operation: "open_binary",
+            predicate_type: "rea.provider-selection",
+            authority: "analyst-inference",
+            confidence: "derived",
+            provider: { id: "rea-provider-selection" },
+            subject: { local_path: second, format: "analysis-database" },
+          },
+        ]);
+        expect(recovered.unknowns).toEqual(before.unknowns);
+      }
       await call("address_name", query);
       expect(
         calls.filter((operation) => operation === "address_name"),

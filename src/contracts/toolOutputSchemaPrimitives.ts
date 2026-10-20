@@ -375,6 +375,7 @@ export const toolUnavailabilityReason = z.enum([
   "target_required",
   "provider_missing",
   "provider_unavailable",
+  "provider_selection_required",
   "target_unsupported",
   "unsupported_host",
 ]);
@@ -473,6 +474,12 @@ export const sessionProvider = z
     analysis_run: analysisRun,
     analysis_activity: analysisActivity,
     provider_operation_health: providerOperationHealth,
+    analysis_provider_selection_state: z
+      .enum(["bound", "unbound", "selection_required"])
+      .nullable()
+      .describe(
+        "Deterministic outcome of deep-provider selection for the reported target. null means no target has been resolved on this route. selection_required means more than one configured provider is eligible and the caller must reopen the target with an explicit provider_id.",
+      ),
     analysis_provider_binding: z
       .object({
         provider: providerIdentity,
@@ -490,6 +497,11 @@ export const sessionProvider = z
         availability: providerAvailability,
         target_support: providerTargetSupport,
         selected: z.boolean(),
+        eligibility: z
+          .enum(["eligible", "ineligible", "unevaluated"])
+          .describe(
+            "Whether this provider can be selected for the reported target. eligible requires host availability, target compatibility, and a resolved identity-matched analysis profile. unevaluated means REA did not resolve this candidate's profile for the current selection; it is an omission, not a rejection.",
+          ),
         capabilities: z.array(providerCapabilitySet),
       }),
     ),

@@ -42,33 +42,67 @@ describe("target-bound provider routing", () => {
     );
   });
 
-  it("binds one overlapping provider, preserves provenance, and never falls back", async () => {
-    const target = await databaseTarget();
-    const alpha = deepProvider("alpha");
-    const beta = deepProvider("beta");
-    const auxiliary = auxiliaryProvider();
-    const session = selectableSession(
-      [beta.provider, alpha.provider],
-      auxiliary,
-    );
+  it("admits a multi-candidate target without binding or starting an engine", async () => {
+    const { session, target, alpha, beta } = await overlappingSession();
 
-    const ambiguous = await session.open(target);
-    expect(ambiguous.ok).toBe(false);
-    if (!ambiguous.ok)
-      expect(ambiguous.error).toMatchObject({ reason: "ambiguous" });
+    // Two eligible providers: the target is admitted without binding or
+    // starting an arbitrary engine, and the decision is reported instead.
+    expect((await session.open(target)).ok).toBe(true);
     expect(alpha.clients).toHaveLength(0);
     expect(beta.clients).toHaveLength(0);
-    expect(session.activeTarget()).toBeUndefined();
+    expect(alpha.profileResolutions).toBe(1);
+    expect(beta.profileResolutions).toBe(1);
+    expect(session.activeTarget()?.path).toBe(target);
+    expect(await bindingStatus(session)).toMatchObject({
+      analysis_provider_selection_state: "selection_required",
+      analysis_provider_binding: null,
+      analysis_provider_candidates: [
+        { provider: { id: "alpha" }, eligibility: "eligible", selected: false },
+        { provider: { id: "beta" }, eligibility: "eligible", selected: false },
+      ],
+    });
+
+    // A deep operation before the caller decides stays typed and actionable.
+    const undecided = await session.execute("address_name", {
+      address: "0x1",
+    });
+    expect(undecided.ok).toBe(false);
+    if (!undecided.ok)
+      expect(undecided.error).toMatchObject({
+        _tag: "ProviderSelectionError",
+        reason: "ambiguous",
+        requestedProviderId: "auto",
+        operation: "address_name",
+      });
+    expect(alpha.clients).toHaveLength(0);
+    expect(beta.clients).toHaveLength(0);
+
+    // Disjoint auxiliary families keep working on a selection-required target.
+    const auxiliaryResult = await session.execute("inspect_macho", {});
+    expect(auxiliaryResult.ok && auxiliaryResult.value.provider.id).toBe(
+      "auxiliary",
+    );
+    await session.close();
+  });
+
+  it("binds an explicitly chosen provider and preserves its provenance", async () => {
+    const { session, target, alpha, beta } = await overlappingSession();
+    expect((await session.open(target)).ok).toBe(true);
 
     expect((await session.open(target, { providerId: "alpha" })).ok).toBe(true);
     expect(await bindingStatus(session)).toMatchObject({
+      analysis_provider_selection_state: "bound",
       analysis_provider_binding: {
         provider: { id: "alpha", version: "1" },
         selection_source: "request",
       },
       analysis_provider_candidates: [
-        { provider: { id: "alpha" }, selected: true },
-        { provider: { id: "beta" }, selected: false },
+        { provider: { id: "alpha" }, eligibility: "eligible", selected: true },
+        {
+          provider: { id: "beta" },
+          eligibility: "unevaluated",
+          selected: false,
+        },
       ],
     });
     expect(alpha.clients).toHaveLength(0);
@@ -89,15 +123,24 @@ describe("target-bound provider routing", () => {
     expect(alpha.clients).toHaveLength(1);
     expect(beta.clients).toHaveLength(0);
 
+    // Reopening the same target and profile retains the live client.
     expect((await session.open(target, { providerId: "alpha" })).ok).toBe(true);
     expect(alpha.clients).toHaveLength(1);
     expect(alpha.clients[0]?.closed).toBe(false);
 
-    const auxiliaryResult = await session.execute("inspect_macho", {});
-    expect(auxiliaryResult.ok && auxiliaryResult.value.provider.id).toBe(
+    const auxiliaryBound = await session.execute("inspect_macho", {});
+    expect(auxiliaryBound.ok && auxiliaryBound.value.provider.id).toBe(
       "auxiliary",
     );
+    await session.close();
+  });
 
+  it("rejects unknown choices and never falls back after a runtime failure", async () => {
+    const { session, target, alpha, beta } = await overlappingSession();
+    expect((await session.open(target, { providerId: "alpha" })).ok).toBe(true);
+
+    // A later auto request keeps the bound provider when no alternative is
+    // eligible, and an unknown choice never disturbs the active binding.
     alpha.available = false;
     expect((await session.open(target)).ok).toBe(true);
     expect(await bindingStatus(session)).toMatchObject({
@@ -113,12 +156,13 @@ describe("target-bound provider routing", () => {
     });
 
     expect((await session.open(target, { providerId: "beta" })).ok).toBe(true);
-    expect(alpha.clients[0]?.closed).toBe(true);
+    // alpha was bound but never asked to analyze, so it has no client to retire.
+    expect(alpha.clients).toHaveLength(0);
     beta.fail = true;
     const failed = await session.execute("address_name", { address: "0x2" });
     expect(failed.ok).toBe(false);
     if (!failed.ok) expect(failed.error._tag).toBe("ProviderAdapterError");
-    expect(alpha.clients[0]?.calls).toEqual(["address_name"]);
+    expect(alpha.clients).toHaveLength(0);
     expect(await bindingStatus(session)).toMatchObject({
       analysis_provider_binding: { provider: { id: "beta" } },
     });
@@ -127,6 +171,38 @@ describe("target-bound provider routing", () => {
     expect(beta.clients[0]?.closed).toBe(true);
   });
 
+  it("never falls back to a provider that already ran after a runtime failure", async () => {
+    const target = await databaseTarget();
+    const alpha = deepProvider("alpha");
+    const beta = deepProvider("beta");
+    const session = selectableSession([beta.provider, alpha.provider]);
+
+    // The first provider actually runs, so a fallback would be observable here.
+    expect((await session.open(target, { providerId: "alpha" })).ok).toBe(true);
+    expect((await session.execute("address_name", { address: "0x1" })).ok).toBe(
+      true,
+    );
+    expect(alpha.clients[0]?.calls).toEqual(["address_name"]);
+
+    expect((await session.open(target, { providerId: "beta" })).ok).toBe(true);
+    expect(alpha.clients[0]?.closed).toBe(true);
+    beta.fail = true;
+    const failed = await session.execute("address_name", { address: "0x2" });
+    expect(failed.ok).toBe(false);
+    if (!failed.ok) expect(failed.error._tag).toBe("ProviderAdapterError");
+    // The failure stays with the selected provider: the retired provider is not
+    // restarted and no provider is silently substituted.
+    expect(alpha.clients[0]?.calls).toEqual(["address_name"]);
+    expect(await bindingStatus(session)).toMatchObject({
+      analysis_provider_binding: { provider: { id: "beta" } },
+    });
+
+    await session.close();
+    expect(beta.clients[0]?.closed).toBe(true);
+  });
+});
+
+describe("target-bound provider routing transitions", () => {
   it("preserves bundle-root identity for artifact inventory operations", async () => {
     const target = await databaseTarget();
     const analysis = deepProvider("alpha");
@@ -188,6 +264,247 @@ describe("target-bound provider routing", () => {
     expect(alpha.clients).toHaveLength(1);
     await session.close();
     expect(alpha.clients[0]?.closed).toBe(true);
+  });
+});
+
+describe("selection-required session lifecycle", () => {
+  it("retains one selection record per distinct decision and never duplicates it", async () => {
+    const target = await databaseTarget();
+    const alpha = deepProvider("alpha");
+    const beta = deepProvider("beta");
+    const session = selectableSession([alpha.provider, beta.provider]);
+
+    expect((await session.open(target)).ok).toBe(true);
+    const pending = selectionRecords(session);
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({
+      predicate_type: "rea.provider-selection",
+      operation: "open_binary",
+      confidence: "derived",
+      provider: { id: "rea-provider-selection" },
+      analysis_profile: null,
+      parameters: { provider_id: "auto" },
+      normalized_result: {
+        selection_state: "selection_required",
+        deterministic_rule: "auto-multiple-eligible",
+        selected_provider_id: null,
+        selection_source: null,
+        eligible_provider_ids: ["alpha", "beta"],
+        caller_rationale: null,
+      },
+    });
+    expect(pending[0]?.subject).toMatchObject({
+      digest: { sha256: expect.stringMatching(/^[a-f0-9]{64}$/u) },
+      format: "analysis-database",
+    });
+
+    // Reopening the same target without a selector keeps the retained route,
+    // so the equivalent decision is not recorded again.
+    expect((await session.open(target)).ok).toBe(true);
+    expect(selectionRecords(session)).toHaveLength(1);
+    expect(await bindingStatus(session)).toMatchObject({
+      analysis_provider_selection_state: "selection_required",
+    });
+    expect(alpha.clients).toHaveLength(0);
+    expect(beta.clients).toHaveLength(0);
+
+    // Choosing a provider records the new, different decision.
+    expect((await session.open(target, { providerId: "beta" })).ok).toBe(true);
+    const decided = selectionRecords(session);
+    expect(decided).toHaveLength(2);
+    expect(
+      decided
+        .map(
+          (record) =>
+            (
+              record.normalized_result as {
+                readonly deterministic_rule: string;
+              }
+            ).deterministic_rule,
+        )
+        .sort(),
+    ).toEqual(["auto-multiple-eligible", "explicit-provider"]);
+    expect(beta.clients).toHaveLength(0);
+
+    const observed = await session.execute("address_name", { address: "0x1" });
+    expect(observed.ok && observed.value.provider.id).toBe("beta");
+    expect(alpha.clients).toHaveLength(0);
+    expect(beta.clients).toHaveLength(1);
+
+    // Selection Evidence is not provider-produced analysis and is never
+    // replayed as a snapshot binding.
+    expect(
+      session.exportAnalysisSnapshot().ok &&
+        selectionRecords(session).every(
+          ({ analysis_profile: profile }) => profile === null,
+        ),
+    ).toBe(true);
+
+    await session.close();
+    expect(selectionRecords(session)).toEqual([]);
+    expect(beta.clients[0]?.closed).toBe(true);
+  });
+
+  it("keeps a selection-required target stable across an auxiliary call", async () => {
+    const target = await databaseTarget();
+    const alpha = deepProvider("alpha");
+    const beta = deepProvider("beta");
+    const session = selectableSession(
+      [alpha.provider, beta.provider],
+      auxiliaryProvider(),
+    );
+    expect((await session.open(target)).ok).toBe(true);
+
+    const auxiliary = await session.execute("inspect_macho", {});
+    expect(auxiliary.ok && auxiliary.value.provider.id).toBe("auxiliary");
+    expect(await bindingStatus(session)).toMatchObject({
+      analysis_provider_selection_state: "selection_required",
+      analysis_provider_binding: null,
+    });
+    expect(alpha.clients).toHaveLength(0);
+    expect(beta.clients).toHaveLength(0);
+    await session.close();
+  });
+});
+
+describe("automatic re-selection on an unchanged target", () => {
+  it("keeps the resolved automatic binding when auto is requested again", async () => {
+    const target = await databaseTarget();
+    const alpha = deepProvider("alpha");
+    const beta = deepProvider("beta");
+    beta.available = false;
+    const session = selectableSession([alpha.provider, beta.provider]);
+
+    expect((await session.open(target)).ok).toBe(true);
+    expect(await bindingStatus(session)).toMatchObject({
+      analysis_provider_selection_state: "bound",
+      analysis_provider_binding: {
+        provider: { id: "alpha" },
+        selection_source: "auto-single-candidate",
+      },
+    });
+    expect((await session.execute("address_name", { address: "0x1" })).ok).toBe(
+      true,
+    );
+    expect(alpha.clients).toHaveLength(1);
+    const resolutions = alpha.profileResolutions;
+
+    // A second provider becomes eligible and the caller repeats `auto`. The
+    // same deterministic policy already answered for these bytes, so the live
+    // binding, its client, and its snapshot are not torn down for a tie.
+    beta.available = true;
+    expect((await session.open(target, { providerId: "auto" })).ok).toBe(true);
+    expect(await bindingStatus(session)).toMatchObject({
+      analysis_provider_selection_state: "bound",
+      analysis_provider_binding: { provider: { id: "alpha" } },
+    });
+    expect(alpha.clients).toHaveLength(1);
+    expect(alpha.clients[0]?.closed).toBe(false);
+    expect(alpha.profileResolutions).toBe(resolutions);
+    expect(beta.clients).toHaveLength(0);
+    await session.close();
+  });
+
+  it("keeps an unbound automatic route stable when auto is requested again", async () => {
+    const { session, target, alpha, beta } = await overlappingSession();
+    expect((await session.open(target)).ok).toBe(true);
+
+    expect((await session.open(target, { providerId: "auto" })).ok).toBe(true);
+    expect(await bindingStatus(session)).toMatchObject({
+      analysis_provider_selection_state: "selection_required",
+      analysis_provider_binding: null,
+    });
+    expect(alpha.profileResolutions).toBe(1);
+    expect(beta.profileResolutions).toBe(1);
+    expect(alpha.clients).toHaveLength(0);
+    expect(beta.clients).toHaveLength(0);
+    await session.close();
+  });
+
+  it("records an explicit choice that reuses the retained client", async () => {
+    const target = await databaseTarget();
+    const alpha = deepProvider("alpha");
+    const beta = deepProvider("beta");
+    beta.available = false;
+    const session = selectableSession([alpha.provider, beta.provider]);
+
+    // Automatic selection binds the only eligible provider and records it.
+    expect((await session.open(target)).ok).toBe(true);
+    expect(await bindingStatus(session)).toMatchObject({
+      analysis_provider_binding: {
+        provider: { id: "alpha", version: "1" },
+        selection_source: "auto-single-candidate",
+      },
+    });
+    expect((await session.execute("address_name", { address: "0x1" })).ok).toBe(
+      true,
+    );
+    expect(alpha.clients).toHaveLength(1);
+    const automatic = selectionRecords(session);
+    expect(automatic).toHaveLength(1);
+    expect(automatic.map(selectionRuleOf)).toEqual(["auto-single-candidate"]);
+    const callsAfterAnalysis = [...(alpha.clients[0]?.calls ?? [])];
+
+    // Asking explicitly for the provider already bound changes no engine work,
+    // so the live client is retained; the caller's choice must still be adopted
+    // and recorded instead of leaving `selection_source` on the earlier
+    // automatic decision.
+    expect((await session.open(target, { providerId: "alpha" })).ok).toBe(true);
+    expect(alpha.clients).toHaveLength(1);
+    expect(alpha.clients[0]?.closed).toBe(false);
+    expect(alpha.clients[0]?.calls).toEqual(callsAfterAnalysis);
+    expect(beta.clients).toHaveLength(0);
+    expect(await bindingStatus(session)).toMatchObject({
+      analysis_provider_selection_state: "bound",
+      analysis_provider_binding: {
+        provider: { id: "alpha", version: "1" },
+        selection_source: "request",
+      },
+    });
+    expect(selectionRecords(session).map(selectionRuleOf).sort()).toEqual([
+      "auto-single-candidate",
+      "explicit-provider",
+    ]);
+
+    // Repeating the same explicit choice is the same decision, so it adds no
+    // record and does not disturb the retained client.
+    expect((await session.open(target, { providerId: "alpha" })).ok).toBe(true);
+    expect(selectionRecords(session)).toHaveLength(2);
+    expect(alpha.clients).toHaveLength(1);
+    expect(alpha.clients[0]?.closed).toBe(false);
+
+    // The retained client still serves analysis after the adoption.
+    expect((await session.execute("address_name", { address: "0x2" })).ok).toBe(
+      true,
+    );
+    expect(alpha.clients).toHaveLength(1);
+    expect(alpha.clients[0]?.calls).toEqual([
+      ...callsAfterAnalysis,
+      "address_name",
+    ]);
+
+    await session.close();
+    expect(alpha.clients[0]?.closed).toBe(true);
+  });
+
+  it("re-resolves auto against a concrete binding because that is a new decision", async () => {
+    const { session, target, alpha, beta } = await overlappingSession();
+    expect((await session.open(target, { providerId: "beta" })).ok).toBe(true);
+    expect((await session.execute("address_name", { address: "0x1" })).ok).toBe(
+      true,
+    );
+    expect(beta.clients).toHaveLength(1);
+
+    // The caller explicitly leaves a concrete binding for automatic selection,
+    // so REA re-resolves and reports the tie instead of keeping that binding.
+    expect((await session.open(target, { providerId: "auto" })).ok).toBe(true);
+    expect(await bindingStatus(session)).toMatchObject({
+      analysis_provider_selection_state: "selection_required",
+      analysis_provider_binding: null,
+    });
+    expect(beta.clients[0]?.closed).toBe(true);
+    expect(alpha.clients).toHaveLength(0);
+    await session.close();
   });
 });
 
@@ -364,6 +681,22 @@ const selectableSession = (
     auxiliary === undefined ? [] : [auxiliary],
   );
 
+/** One parsed database target with two eligible deep providers and an auxiliary. */
+const overlappingSession = async () => {
+  const target = await databaseTarget();
+  const alpha = deepProvider("alpha");
+  const beta = deepProvider("beta");
+  return {
+    target,
+    alpha,
+    beta,
+    session: selectableSession(
+      [beta.provider, alpha.provider],
+      auxiliaryProvider(),
+    ),
+  };
+};
+
 const capability = (
   provider: ProviderIdentity,
   operation: DeclaredOperation,
@@ -394,11 +727,27 @@ const databaseTarget = async (): Promise<string> => {
 const bindingStatus = async (session: BinarySession) =>
   z
     .object({
+      analysis_provider_selection_state: z.unknown(),
       analysis_provider_binding: z.unknown(),
       analysis_provider_candidates: z.array(z.unknown()),
     })
     .passthrough()
     .parse(await session.status());
+
+/** Session-owned records for deterministic selection decisions only. */
+const selectionRecords = (session: BinarySession) =>
+  session
+    .exportEvidenceBundle()
+    .records.filter(
+      ({ predicate_type: predicate }) => predicate === "rea.provider-selection",
+    );
+
+/** Deterministic rule reported by one selection record. */
+const selectionRuleOf = (record: {
+  readonly normalized_result: unknown;
+}): string =>
+  z.object({ deterministic_rule: z.string() }).parse(record.normalized_result)
+    .deterministic_rule;
 
 interface Deferred<Value> {
   readonly promise: Promise<Value>;
