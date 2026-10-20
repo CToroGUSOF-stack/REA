@@ -228,6 +228,10 @@ const registerScreenshotDiff = (
         .max(255)
         .default(0)
         .describe("Per-channel difference threshold for changed pixels"),
+      regions: z
+        .string()
+        .optional()
+        .describe("PNG pixel rectangles as a JSON array or JSON file path"),
     }),
     run: ({ args, options }) =>
       logCliCommand(logger, "compare-web-screenshots", async () => {
@@ -235,6 +239,9 @@ const registerScreenshotDiff = (
         const inputs = await parseJsonArguments(operation, {
           before: args.beforeJson,
           after: args.afterJson,
+          ...(options.regions === undefined
+            ? {}
+            : { regions: options.regions }),
         });
         if (!inputs.ok) return inputs.error;
         const { before, after } = inputs.value;
@@ -242,6 +249,9 @@ const registerScreenshotDiff = (
           before,
           after,
           channel_threshold: options.channelThreshold,
+          ...(options.regions === undefined
+            ? {}
+            : { regions: inputs.value.regions }),
         };
         const parsed = compareWebScreenshotsInputSchema.safeParse(input);
         if (!parsed.success)

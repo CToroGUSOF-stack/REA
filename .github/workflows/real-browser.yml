@@ -32,6 +32,9 @@ jobs:
       - uses: ./.github/actions/portable-build-cache
         with:
           build_cache_artifact: ${{ inputs.build_cache_artifact }}
+      - run: npm run verify:browser:screenshot-regions
+        env:
+          REA_BROWSER_EXECUTABLE: /usr/bin/google-chrome
       - run: npm run verify:browser
         env:
           REA_BROWSER_EXECUTABLE: /usr/bin/google-chrome

@@ -281,7 +281,7 @@ export const BROWSER_TOOL_CONTRACTS = [
     name: "compare_web_screenshots",
     ...toolContractMetadata("compare_web_screenshots"),
     description:
-      "Compare two self-verifying PNG screenshot artifacts with local pixel metrics. Returns exact changed-pixel ratios and channel deltas without OCR or external services.",
+      "Compare two self-verifying PNG screenshot artifacts with local pixel metrics, changed-pixel bounds, and optional rectangular regions in PNG pixels. Returns whole-image and per-region ratios and channel deltas without OCR or external services.",
     kind: "browser-provider",
     inputSchema: compareWebScreenshotsInputSchema,
     outputSchema: screenshotDiffOutputSchema,
@@ -292,6 +292,7 @@ export const BROWSER_TOOL_CONTRACTS = [
           before: exampleScreenshot(),
           after: exampleScreenshot(),
           channel_threshold: 0,
+          regions: [{ x: 0, y: 0, width: 1, height: 1 }],
         },
       },
     ],

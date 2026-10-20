@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <title>Spatial comparison fixture</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      background: #f5f6fa;
+      font-family: Arial, sans-serif;
+    }
+    header {
+      height: 72px;
+      background: #142238;
+      color: white;
+      padding: 24px 40px;
+    }
+    main {
+      position: absolute;
+      left: 40px;
+      top: 120px;
+      width: 320px;
+      height: 280px;
+      background: white;
+    }
+    h1 {
+      position: absolute;
+      left: 24px;
+      top: 24px;
+      width: 296px;
+      height: 32px;
+      /* Keep font-dependent glyph overhang inside the verified rectangle. */
+      overflow: hidden;
+      margin: 0;
+      font-size: 24px;
+      line-height: 32px;
+    }
+    p {
+      position: absolute;
+      left: 24px;
+      top: 90px;
+    }
+    button {
+      position: absolute;
+      left: 24px;
+      top: 200px;
+      width: 200px;
+      height: 48px;
+      border: 0;
+      border-radius: 0;
+      background: #2463eb;
+      color: white;
+      font:
+        16px Arial,
+        sans-serif;
+    }
+    output {
+      position: absolute;
+      top: 430px;
+      left: 40px;
+    }
+    @media (max-width: 420px) {
+      main {
+        left: 16px;
+      }
+    }
+  </style>
+  <header>WORKSPACE</header>
+  <main>
+    <h1>Team workspace</h1>
+    <p>Build something together.</p>
+    <button type="button" aria-pressed="false">Join workspace</button>
+  </main>
+  <output aria-live="polite">Not joined</output>
+  <script>
+    document.querySelector("button").addEventListener("click", (event) => {
+      const joined =
+        event.currentTarget.getAttribute("aria-pressed") !== "true";
+      event.currentTarget.setAttribute("aria-pressed", String(joined));
+      document.querySelector("output").textContent = joined
+        ? "Joined"
+        : "Not joined";
+    });
+  </script>
+</html>

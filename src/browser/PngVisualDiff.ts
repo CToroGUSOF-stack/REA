@@ -10,6 +10,11 @@ import {
   AnalysisUnsupportedTargetError,
 } from "../domain/analysisErrorCore.js";
 import { decodeCanonicalBase64 } from "../domain/webScreenshot.js";
+import {
+  admitScreenshotRegionPayload,
+  admitScreenshotRegions,
+  compareScreenshotRegions,
+} from "./ScreenshotRegionDiff.js";
 
 interface DecodedPng {
   readonly width: number;
@@ -38,14 +43,18 @@ export const comparePngScreenshots = (
   input: CompareWebScreenshotsInput,
 ): WebScreenshotDiff => {
   admitEncodedInputPair(input.before, input.after);
+  admitScreenshotRegionPayload(input.regions ?? []);
   const beforePlan = parsePng(input.before, "before");
   const afterPlan = parsePng(input.after, "after");
   admitPngPair(beforePlan, afterPlan);
+  admitScreenshotRegions(beforePlan, afterPlan, input.regions ?? []);
   const before = decodePng(beforePlan);
   const after = decodePng(afterPlan);
   if (before.width !== after.width || before.height !== after.height)
     return {
       status: "dimension_mismatch",
+      changed_bounds: null,
+      ...(input.regions === undefined ? {} : { region_diffs: null }),
       before: dimensions(before),
       after: dimensions(after),
       channel_threshold: input.channel_threshold,
@@ -56,44 +65,17 @@ export const comparePngScreenshots = (
       mean_absolute_channel_delta: null,
       limitations: limitations(),
     };
-  let changedPixels = 0;
-  let maximumDelta = 0;
-  let totalDelta = 0;
-  for (let offset = 0; offset < before.rgba.length; offset += 4) {
-    let changed = false;
-    for (let channel = 0; channel < 4; channel += 1) {
-      const delta = Math.abs(
-        (before.rgba[offset + channel] ?? 0) -
-          (after.rgba[offset + channel] ?? 0),
-      );
-      totalDelta += delta;
-      maximumDelta = Math.max(maximumDelta, delta);
-      if (delta > input.channel_threshold) changed = true;
-    }
-    if (changed) changedPixels += 1;
-  }
-  const pixels = before.width * before.height;
-  const context = {
+  return {
     before: dimensions(before),
     after: dimensions(after),
     channel_threshold: input.channel_threshold,
-    compared_pixels: pixels,
-    maximum_channel_delta: maximumDelta,
-    mean_absolute_channel_delta: totalDelta / (pixels * 4),
     limitations: limitations(),
-  };
-  if (changedPixels === 0)
-    return {
-      ...context,
-      status: "identical",
-      changed_pixels: 0,
-      changed_ratio: 0,
-    };
-  return {
-    ...context,
-    status: "different",
-    changed_pixels: changedPixels,
-    changed_ratio: changedPixels / pixels,
+    ...compareScreenshotRegions(
+      before,
+      after,
+      input.channel_threshold,
+      input.regions,
+    ),
   };
 };
 

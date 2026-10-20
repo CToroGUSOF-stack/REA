@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 
 import { z } from "zod";
+import {
+  webScreenshotRegionSchema,
+  webScreenshotRegionDiffSchema,
+  validateScreenshotSpatialMetrics,
+} from "./screenshotRegion.js";
 
 import { browserCompletenessSchema } from "./browserCompleteness.js";
 import {
@@ -66,6 +71,12 @@ export const compareWebScreenshotsInputSchema = z.strictObject({
   before: webScreenshotArtifactSchema,
   after: webScreenshotArtifactSchema,
   channel_threshold: z.number().int().min(0).max(255).default(0),
+  regions: z
+    .array(webScreenshotRegionSchema)
+    .optional()
+    .describe(
+      "Rectangles in PNG pixels (not CSS pixels), fully inside both images. Results preserve request order; overlaps are compared independently.",
+    ),
 });
 export type CompareWebScreenshotsInput = z.infer<
   typeof compareWebScreenshotsInputSchema
@@ -85,11 +96,16 @@ const webScreenshotDiffContextShape = {
   limitations: z.array(z.string()),
 };
 
+// Historical results omit spatial fields. Preserve that omission rather than
+// inventing null bounds (whose meaning depends on the comparison status).
+// Current producers always emit bounds; per-region results have no legacy form.
 export const webScreenshotDiffSchema = z
   .discriminatedUnion("status", [
     z.object({
       ...webScreenshotDiffContextShape,
       status: z.literal("identical"),
+      changed_bounds: z.null().optional(),
+      region_diffs: z.array(webScreenshotRegionDiffSchema).optional(),
       compared_pixels: z.number().int().positive(),
       changed_pixels: z.literal(0),
       changed_ratio: z.literal(0),
@@ -99,6 +115,8 @@ export const webScreenshotDiffSchema = z
     z.object({
       ...webScreenshotDiffContextShape,
       status: z.literal("different"),
+      changed_bounds: webScreenshotRegionSchema.optional(),
+      region_diffs: z.array(webScreenshotRegionDiffSchema).optional(),
       compared_pixels: z.number().int().positive(),
       changed_pixels: z.number().int().positive(),
       changed_ratio: z.number().positive().max(1),
@@ -108,6 +126,8 @@ export const webScreenshotDiffSchema = z
     z.object({
       ...webScreenshotDiffContextShape,
       status: z.literal("dimension_mismatch"),
+      changed_bounds: z.null().optional(),
+      region_diffs: z.null().optional(),
       compared_pixels: z.literal(0),
       changed_pixels: z.null(),
       changed_ratio: z.null(),
@@ -134,6 +154,7 @@ export const webScreenshotDiffSchema = z
         path: ["compared_pixels"],
         message: "Compared pixel count must match the shared dimensions",
       });
+    validateScreenshotSpatialMetrics(diff, context);
   });
 export type WebScreenshotDiff = z.infer<typeof webScreenshotDiffSchema>;
 

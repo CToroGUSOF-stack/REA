@@ -848,6 +848,49 @@ it.each([
   expect(await classify(directory, base, head)).toMatchObject(expected);
 });
 
+it.each([
+  "scripts/verify-screenshot-regions.mjs",
+  "scripts/lib/browser-screenshot-verifier-cleanup.mjs",
+  "scripts/lib/browser-screenshot-verifier-cleanup.d.mts",
+  "scripts/fixtures/visual-coding-page.html",
+  "src/application/BrowserEvidence.ts",
+  "src/browser/PngVisualDiff.ts",
+  "src/browser/ScreenshotRegionDiff.ts",
+  "src/cli/browserAdvancedCommands.ts",
+  "src/contracts/browserToolContracts.ts",
+  "src/domain/screenshotRegion.ts",
+  "src/domain/webScreenshot.ts",
+  "package.json",
+])("keeps screenshot verifier input %s on the browser lane", async (path) => {
+  const { directory } = await fixture();
+  const base = await change(
+    directory,
+    ["package.json"],
+    JSON.stringify({ scripts: {} }),
+  );
+  const head = await change(
+    directory,
+    [path],
+    path === "package.json"
+      ? JSON.stringify({
+          scripts: {
+            "verify:browser:screenshot-regions":
+              "npm run build:cached && node scripts/verify-screenshot-regions.mjs",
+          },
+        })
+      : "Changed screenshot verifier input\n",
+  );
+  const plan = await classify(directory, base, head);
+  const { CI_FLAGS } = await loadScopes();
+  const expected = ["code", "browser"];
+  if (path.startsWith("src/")) expected.push("runtime");
+  if (path.startsWith("src/domain/") || path.startsWith("src/contracts/"))
+    expected.push("docs");
+  for (const flag of CI_FLAGS)
+    expect(plan[flag], flag).toBe(expected.includes(flag));
+  expect(plan.reasons).toEqual([]);
+});
+
 it("scopes package script edits while retaining broad dependency checks", async () => {
   const { directory } = await fixture();
   const before = {

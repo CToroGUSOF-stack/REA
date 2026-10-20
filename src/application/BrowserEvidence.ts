@@ -126,6 +126,7 @@ const browserParameters = (
         before_artifact_sha256: input.before.sha256,
         after_artifact_sha256: input.after.sha256,
         channel_threshold: input.channel_threshold,
+        ...(input.regions === undefined ? {} : { regions: input.regions }),
       };
     throw new Error("Browser comparison input did not match a comparison type");
   }

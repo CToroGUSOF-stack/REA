@@ -41,6 +41,59 @@ Target discovery returns the complete in-scope target array in one result.
 
 ## Screenshot comparison memory budget
 
+### Locating changes and comparing selected regions
+
+`compare_web_screenshots` returns `changed_bounds`, the smallest rectangle
+containing pixels whose RGBA channel delta exceeds `channel_threshold`.
+Coordinates are integer PNG pixels from the top-left, not CSS pixels; rectangles
+use `{x, y, width, height}` with exclusive right/bottom edges.
+
+```bash
+rea compare-web-screenshots before-artifact.json after-artifact.json \
+  --regions '[{"x":40,"y":80,"width":240,"height":160}]' \
+  --channel-threshold 2 --json
+```
+
+Artifact files contain the capture's `artifact` object. `--regions` accepts an
+inline JSON array or file path; MCP accepts the same array as `regions`.
+
+- Whole-image metrics remain available. When requested, `region_diffs` echoes
+  each region in order with its status, pixel counts, ratio, channel deltas and
+  bounds. Ratios use the region's area; bounds use whole-image coordinates.
+  Overlaps and duplicates are independent, so their counts must not be summed.
+- Omitted regions produce no `region_diffs`; an empty selection produces `[]`.
+  Historical Evidence without either spatial field remains readable, preserving
+  missing fields. Requests and artifact digests remain in Evidence parameters.
+- `identical` has null bounds, though raw channel deltas can be nonzero below
+  the threshold. Mean deltas include all RGBA channels of all compared pixels.
+- Regions must have nonnegative integer origins and positive integer sizes and
+  fit entirely within both PNGs. Invalid requests fail before inflation; there
+  is no implicit clipping or resizing. Dimension mismatch returns null bounds
+  and, when regions were requested, null `region_diffs`: comparison is unknown.
+
+Bounds may enclose unchanged pixels between separate changes. They locate pixel
+changes, not DOM elements or CSS causes. Use matching viewport, device scale,
+fonts and page state; verify interactions separately from screenshot equality.
+
+Both images are decoded once; comparison work covers the full image plus each
+selected region, without cropped buffers. Before inflation, requests are limited
+by 64 Mi selected-region pixel visits for equal-sized images and a 1 MiB estimated
+region payload (1 KiB per region, up to 1,024 regions). Exceeding these budgets
+returns `resource_constraint` with resource `cpu` or `capacity`; selections are
+never truncated. Decoder memory is admitted separately below.
+
+The work allowance took about 0.75 s on Node 24.18.0/macOS arm64 for 32 full-image
+regions at 2048 × 1024. A 4,096-region probe serialized about 0.94 MiB before
+Evidence wrapping, motivating the conservative per-region reservation. These
+are admission calibrations, not latency guarantees or whole-task memory bounds.
+
+Run `npm run verify:browser:screenshot-regions` with an absolute
+`REA_BROWSER_EXECUTABLE`. The owned Chromium fixture checks layout, text, color,
+missing elements, local repair, unchanged regions and click/keyboard transitions
+through public CLI/MCP comparisons at desktop/mobile sizes and device scale 2.
+
+### Decoder admission
+
 `compare_web_screenshots` admits both PNGs against a 256 MiB estimated
 working-memory budget before inflating either image. This is a processing
 buffer budget for this operation, not a PNG dimension limit, CDP transport
