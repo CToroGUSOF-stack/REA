@@ -362,13 +362,14 @@ const fullFailureEnvelope = (
   const formatted = Formatter.format(failure, format);
   const total = estimateTokenCount(formatted);
   const offset = tokenOffset ?? 0;
-  const end = tokenLimit === undefined ? total : offset + tokenLimit;
+  const actualOffset = Math.min(offset, total);
+  const end = tokenLimit === undefined ? total : actualOffset + tokenLimit;
   if (offset === 0 && end >= total) return { ok: false, error: failure, meta };
   const actualEnd = Math.min(end, total);
   const nextOffset = actualEnd < total ? actualEnd : undefined;
   return {
     ok: false,
-    error: `${sliceByTokens(formatted, offset, end)}\n[truncated: showing tokens ${offset}–${actualEnd} of ${total}]`,
+    error: `${sliceByTokens(formatted, actualOffset, end)}\n[truncated: showing tokens ${actualOffset}–${actualEnd} of ${total}]`,
     meta: { ...meta, ...(nextOffset === undefined ? {} : { nextOffset }) },
   };
 };

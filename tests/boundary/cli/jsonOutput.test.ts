@@ -297,47 +297,81 @@ describe("CLI result output surface", () => {
 });
 
 describe("full-output token windows", () => {
-  it("preserves Incur token-window metadata when truncating a TOON failure", async () => {
-    const chunks: Buffer[] = [];
-    const destination = new Writable({
-      write(chunk: Buffer, _encoding, callback) {
-        chunks.push(chunk);
-        callback();
-      },
-    });
-    const argv = [
-      "inspect-managed-artifact",
-      "missing.dll",
-      "--format",
-      "toon",
-      "--full-output",
-      "--token-limit",
-      "3",
-    ];
-    const output = createCliResultOutput(argv, destination);
-    if (output === undefined) throw new Error("Missing TOON output surface");
-    const cli = Cli.create("rea-output-test", { sync: false });
-    registerManagedCommands(cli, silentLogger, async () => ({
-      code: "target_unavailable",
-      category: "unavailable",
-      message: "The selected artifact is missing.",
-      retryable: false,
-      remediation: { action: "Check that the path exists." },
-      details: { source: "artifact-open" },
-    }));
-    streamCliCommandResults(cli, output);
-    const previousExitCode = process.exitCode;
-    try {
-      await cli.serve(argv, { stdout: () => undefined });
-      expect(process.exitCode).toBe(1);
-    } finally {
-      process.exitCode = previousExitCode;
-    }
-    const text = Buffer.concat(chunks).toString("utf8");
-    expect(text).toContain("[truncated: showing tokens 0–3 of");
-    expect(text).toMatch(/nextOffset:?\s*3/);
-    expect(text).toContain("ok: false");
-  });
+  it.each([
+    {
+      name: "the first page",
+      tokenWindow: ["--token-limit", "3"],
+      expectedNextOffset: true,
+    },
+    {
+      name: "an offset beyond the end",
+      tokenWindow: ["--token-offset", "100000"],
+      expectedNextOffset: false,
+    },
+    {
+      name: "a limited offset beyond the end",
+      tokenWindow: ["--token-offset", "100000", "--token-limit", "3"],
+      expectedNextOffset: false,
+    },
+  ])(
+    "reports accurate ranges for $name",
+    async ({ tokenWindow, expectedNextOffset }) => {
+      const chunks: Buffer[] = [];
+      const destination = new Writable({
+        write(chunk: Buffer, _encoding, callback) {
+          chunks.push(chunk);
+          callback();
+        },
+      });
+      const argv = [
+        "inspect-managed-artifact",
+        "missing.dll",
+        "--format",
+        "toon",
+        "--full-output",
+        ...tokenWindow,
+      ];
+      const output = createCliResultOutput(argv, destination);
+      if (output === undefined) throw new Error("Missing TOON output surface");
+      const cli = Cli.create("rea-output-test", { sync: false });
+      registerManagedCommands(cli, silentLogger, async () => ({
+        code: "target_unavailable",
+        category: "unavailable",
+        message: "The selected artifact is missing.",
+        retryable: false,
+        remediation: { action: "Check that the path exists." },
+        details: { source: "artifact-open" },
+      }));
+      streamCliCommandResults(cli, output);
+      const previousExitCode = process.exitCode;
+      try {
+        await cli.serve(argv, { stdout: () => undefined });
+        expect(process.exitCode).toBe(1);
+      } finally {
+        process.exitCode = previousExitCode;
+      }
+      const text = Buffer.concat(chunks).toString("utf8");
+      const range = /\[truncated: showing tokens (\d+)–(\d+) of (\d+)\]/u.exec(
+        text,
+      );
+      expect(range).not.toBeNull();
+      if (range === null) throw new Error("Missing token range");
+      const [, startText, endText, totalText] = range;
+      const start = Number(startText);
+      const end = Number(endText);
+      const total = Number(totalText);
+      expect(start).toBeLessThanOrEqual(end);
+      expect(end).toBeLessThanOrEqual(total);
+      if (expectedNextOffset) {
+        expect(text).toContain("nextOffset: 3");
+        expect([start, end]).toEqual([0, 3]);
+      } else {
+        expect(text).not.toContain("nextOffset");
+        expect([start, end]).toEqual([total, total]);
+      }
+      expect(text).toContain("ok: false");
+    },
+  );
 });
 
 describe("logger classification handoff", () => {
