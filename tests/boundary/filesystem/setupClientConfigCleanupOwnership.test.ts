@@ -1,4 +1,5 @@
 import {
+  lstat as fsLstat,
   mkdir,
   open as fsOpen,
   readFile,
@@ -29,15 +30,19 @@ import {
 import { RegularFileCleanupFailure } from "../../../src/application/RegularFileRead.js";
 import { configureDetectedClients } from "../../../src/application/SetupClients.js";
 import { configureClientConfiguration } from "../../../src/application/SetupClientConfiguration.js";
-import { systemUninstallHost } from "../../../src/application/Uninstall.js";
+import {
+  systemUninstallHost,
+  runUninstall,
+} from "../../../src/application/Uninstall.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
-  return { ...actual, open: vi.fn(actual.open) };
+  return { ...actual, open: vi.fn(actual.open), lstat: vi.fn(actual.lstat) };
 });
 
 const openMock = vi.mocked(fsOpen);
+const lstatMock = vi.mocked(fsLstat);
 let actualFs: typeof import("node:fs/promises");
 
 beforeEach(async () => {
@@ -46,26 +51,43 @@ beforeEach(async () => {
       "node:fs/promises",
     );
   openMock.mockImplementation((...args) => actualFs.open(...args));
+  lstatMock.mockImplementation((...args) => actualFs.lstat(...args));
 });
 
-afterEach(() => openMock.mockReset());
+afterEach(() => {
+  openMock.mockReset();
+  lstatMock.mockReset();
+});
 
-const holdReadHandle = (path: string, reason: string) => {
+const holdReadHandle = (
+  path: string,
+  reason: string,
+  initiallyHeld = true,
+  maxFailures = Number.POSITIVE_INFINITY,
+) => {
   const closeAttempts: FileHandle[] = [];
   let released = false;
+  let held = initiallyHeld;
+  let remainingFailures = maxFailures;
   openMock.mockImplementation(async (...args) => {
     const handle = await actualFs.open(...args);
     if (String(args[0]) !== path) return handle;
     const nativeClose = handle.close.bind(handle);
     vi.spyOn(handle, "close").mockImplementation(async () => {
       closeAttempts.push(handle);
-      if (!released) throw new Error(reason);
+      if (held && !released && remainingFailures > 0) {
+        remainingFailures -= 1;
+        throw new Error(reason);
+      }
       await nativeClose();
     });
     return handle;
   });
   return {
     closeAttempts,
+    hold: () => {
+      held = true;
+    },
     release: () => {
       released = true;
     },
@@ -165,6 +187,275 @@ it("stops uninstall and retains the backup read owner when its close fails", asy
     expect(await readFile(path, "utf8")).toBe(configured);
     expect(closeAttempts).toHaveLength(2);
     await expectCloseReclaimsHandle(host, closeAttempts, release);
+  } finally {
+    await cleanupHeldHandle(host, release);
+  }
+});
+
+it("keeps shared-ownership proof when the ownership read completes but its close fails", async () => {
+  // FreeBuff without a profile marker leaves its shared storage applicability-
+  // unverified. The completed ownership read is the proof that later read
+  // failures are blocking; discarding it softens every failure to retained,
+  // so purge runs while the active shared registration remains.
+  const home = await createTestTempDirectory("rea-freebuff-ownership-close-");
+  const setupHost = systemSetupHost(
+    { platform: "linux", homeDirectory: home } as DoctorHost,
+    { HOME: home },
+  );
+  const client = (await setupHost.supportedClients()).find(
+    ({ name }) => name === "freebuff",
+  );
+  if (client === undefined) throw new Error("freebuff client missing");
+  await mkdir(dirname(client.configPath), { recursive: true });
+  await writeFile(
+    client.configPath,
+    JSON.stringify({ mcpServers: { other: { command: "other" } } }),
+  );
+  expect(
+    await configureClientConfiguration(client, {}, ["rea", "mcp"]),
+  ).toMatchObject({ status: "configured" });
+  const state = join(home, ".rea", "state.json");
+  await mkdir(dirname(state), { recursive: true });
+  await writeFile(state, "{}\n");
+  const { release } = holdReadHandle(
+    client.configPath,
+    "held ownership read handle",
+  );
+  const host = systemUninstallHost(home, undefined, { HOME: home }, "linux");
+  try {
+    const result = await runUninstall(true, host);
+    expect(result.status).toBe("failed");
+    expect(result.items).toContainEqual(
+      expect.objectContaining({ name: "freebuff", status: "failed" }),
+    );
+    expect(result.items).toContainEqual(
+      expect.objectContaining({
+        name: "uninstall",
+        status: "skipped",
+        detail: expect.stringContaining(
+          "No REA registration, skill, or data was removed",
+        ),
+      }),
+    );
+    // Data must not be purged while the shared registration is still active.
+    await expect(readFile(state, "utf8")).resolves.toBe("{}\n");
+  } finally {
+    await cleanupHeldHandle(host, release);
+  }
+});
+
+it("keeps shared-ownership proof when removal refuses a shadowed duplicate", async () => {
+  // The effective row is REA-owned while an earlier duplicate is foreign, so
+  // removal refuses the edit. That refusal must not erase ownership: without
+  // the positive row fact, recurring close failures soften to retained and
+  // purge runs while the owned row remains active.
+  const home = await createTestTempDirectory("rea-freebuff-shadowed-close-");
+  const setupHost = systemSetupHost(
+    { platform: "linux", homeDirectory: home } as DoctorHost,
+    { HOME: home },
+  );
+  const client = (await setupHost.supportedClients()).find(
+    ({ name }) => name === "freebuff",
+  );
+  if (client === undefined) throw new Error("freebuff client missing");
+  await mkdir(dirname(client.configPath), { recursive: true });
+  await writeFile(
+    client.configPath,
+    '{"mcpServers":{"rea":{"command":"foreign-server","args":[]},"rea":{"command":"rea","args":["mcp"]}}}',
+  );
+  const state = join(home, ".rea", "state.json");
+  await mkdir(dirname(state), { recursive: true });
+  await writeFile(state, "{}\n");
+  const { release } = holdReadHandle(
+    client.configPath,
+    "held ownership read handle",
+  );
+  const host = systemUninstallHost(home, undefined, { HOME: home }, "linux");
+  try {
+    const result = await runUninstall(true, host);
+    expect(result.status).toBe("failed");
+    expect(result.items).toContainEqual(
+      expect.objectContaining({ name: "freebuff", status: "failed" }),
+    );
+    expect(result.items).toContainEqual(
+      expect.objectContaining({
+        name: "uninstall",
+        status: "skipped",
+        detail: expect.stringContaining(
+          "No REA registration, skill, or data was removed",
+        ),
+      }),
+    );
+    await expect(readFile(state, "utf8")).resolves.toBe("{}\n");
+  } finally {
+    await cleanupHeldHandle(host, release);
+  }
+});
+
+it("stops removal when a completed reread leaves its handle unreleased", async () => {
+  // Greptile P1: preflight and reread both complete with a foreign-only row,
+  // but the reread handle cannot be closed even by the cleanup retry. REA
+  // still owns that open handle, so removal must stop before purge: serving
+  // the completed text would let removeAll delete managed data while the
+  // incomplete cleanup is only reported later, by close().
+  const home = await createTestTempDirectory("rea-freebuff-reread-leak-");
+  const setupHost = systemSetupHost(
+    { platform: "linux", homeDirectory: home } as DoctorHost,
+    { HOME: home },
+  );
+  const client = (await setupHost.supportedClients()).find(
+    ({ name }) => name === "freebuff",
+  );
+  if (client === undefined) throw new Error("freebuff client missing");
+  await mkdir(dirname(client.configPath), { recursive: true });
+  await writeFile(
+    client.configPath,
+    '{"mcpServers":{"rea":{"command":"foreign-server","args":[]}}}',
+  );
+  const state = join(home, ".rea", "state.json");
+  await mkdir(dirname(state), { recursive: true });
+  await writeFile(state, "{}\n");
+  const { hold, release } = holdReadHandle(
+    client.configPath,
+    "held removal reread handle",
+    false,
+  );
+  const base = systemUninstallHost(home, undefined, { HOME: home }, "linux");
+  const host = {
+    ...base,
+    inspectSkill: async () => {
+      hold();
+      return base.inspectSkill?.();
+    },
+  };
+  try {
+    const result = await runUninstall(true, host);
+    expect(result.status).toBe("failed");
+    expect(result.items).toContainEqual(
+      expect.objectContaining({
+        name: "freebuff",
+        status: "failed",
+        detail: expect.stringContaining("its resources could not be released"),
+      }),
+    );
+    expect(result.items).toContainEqual(
+      expect.objectContaining({
+        name: "uninstall",
+        status: "skipped",
+        detail: expect.stringContaining("Uninstall stopped at this failure"),
+      }),
+    );
+    // Managed data must survive an unreleased read handle.
+    await expect(readFile(state, "utf8")).resolves.toBe("{}\n");
+  } finally {
+    await cleanupHeldHandle(host, release);
+  }
+});
+
+it("keeps the ZCode fallback row when its profile probe is unresolved", async () => {
+  // A denied profile probe leaves ZCode's applicability unresolved, never
+  // absent: the shared fallback must stay in ZCode's scope so its row is
+  // inspected and removed, fail-closed, instead of leaving an installed
+  // ZCode wired to purged data. Definitive absence still keeps ZCode out of
+  // another product's primary storage.
+  const home = await createTestTempDirectory("rea-zcode-fallback-unresolved-");
+  const fallback = join(home, ".agents", "mcp.json");
+  const profile = join(home, ".zcode", "cli");
+  lstatMock.mockImplementation((path) =>
+    String(path) === profile
+      ? Promise.reject(
+          Object.assign(new Error("EACCES: permission denied, lstat"), {
+            code: "EACCES",
+          }),
+        )
+      : actualFs.lstat(path),
+  );
+  const unresolved = systemUninstallHost(
+    home,
+    undefined,
+    { HOME: home },
+    "linux",
+  );
+  try {
+    const clients = await unresolved.clients();
+    const row = clients.find(
+      (candidate) =>
+        candidate.name === "zcode" && candidate.configPath === fallback,
+    );
+    expect(row).toMatchObject({ format: "zcode_fallback" });
+    // Fail-closed: the unresolved row carries no unverified softening, so a
+    // failed read blocks removal instead of retaining around the purge.
+    expect(row?.applicability).toBeUndefined();
+  } finally {
+    await unresolved.close?.();
+  }
+  lstatMock.mockImplementation((...args) => actualFs.lstat(...args));
+  const absent = systemUninstallHost(home, undefined, { HOME: home }, "linux");
+  try {
+    const clients = await absent.clients();
+    expect(
+      clients.some(
+        (candidate) =>
+          candidate.name === "zcode" && candidate.format === "zcode_fallback",
+      ),
+    ).toBe(false);
+  } finally {
+    await absent.close?.();
+  }
+});
+
+it("serves a completed removal reread when its close retry releases the handle", async () => {
+  // Preflight saw no owned row; another writer adds one before removal. The
+  // reread's first close fails but its cleanup retry releases the handle:
+  // the completed text is the ownership evidence that drives removal of the
+  // concurrently added row instead of softening to retained and leaving it
+  // active while data is purged.
+  const home = await createTestTempDirectory("rea-freebuff-reread-close-");
+  const setupHost = systemSetupHost(
+    { platform: "linux", homeDirectory: home } as DoctorHost,
+    { HOME: home },
+  );
+  const client = (await setupHost.supportedClients()).find(
+    ({ name }) => name === "freebuff",
+  );
+  if (client === undefined) throw new Error("freebuff client missing");
+  await mkdir(dirname(client.configPath), { recursive: true });
+  await writeFile(
+    client.configPath,
+    '{"mcpServers":{"rea":{"command":"foreign-server","args":[]}}}',
+  );
+  const cacheOwned = join(home, ".rea", "cache", "owned");
+  await mkdir(dirname(cacheOwned), { recursive: true });
+  await writeFile(cacheOwned, "owned\n");
+  const { hold, release } = holdReadHandle(
+    client.configPath,
+    "held removal reread handle",
+    false,
+    1,
+  );
+  const base = systemUninstallHost(home, undefined, { HOME: home }, "linux");
+  const host = {
+    ...base,
+    inspectSkill: async () => {
+      // Another writer registers REA between preflight and removal.
+      await writeFile(
+        client.configPath,
+        '{"mcpServers":{"rea":{"command":"rea","args":["mcp"]}}}',
+      );
+      hold();
+      return base.inspectSkill?.();
+    },
+  };
+  try {
+    const result = await runUninstall(true, host);
+    expect(result.status).toBe("complete");
+    expect(result.items).toContainEqual(
+      expect.objectContaining({ name: "freebuff", status: "removed" }),
+    );
+    expect(await readFile(client.configPath, "utf8")).not.toContain("rea");
+    await expect(readFile(cacheOwned)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   } finally {
     await cleanupHeldHandle(host, release);
   }
