@@ -43,6 +43,8 @@ it("summarizes selected members and pages every original collection after the fi
     path,
     buildManagedPeFixture({
       methodRowCount: 2,
+      fieldSignature: Buffer.from([0x06, 0x12, 0x04]),
+      methodSignature: Buffer.from([0x00, 0x00, 0x12, 0x04]),
       // ldarg.0; ldfld field; call member ref; ldstr "ok"; pop; ret
       ilBody: Buffer.from([
         (18 << 2) | 2,
@@ -114,12 +116,15 @@ it("summarizes selected members and pages every original collection after the fi
   expect(parent.parameters).toEqual({ path, type_names });
   expect(receipt.evidence_links).toEqual([parent.evidence_id]);
   const report = managedMemberInspectionSchema.parse(parent.normalized_result);
+  expect(report.fields[0]?.signature.field_type).toBe(
+    "class:4 (Fixture.Program)",
+  );
   expect(view.summary.selection).toEqual({
     type_names,
     unmatched_type_names: ["Missing.Type"],
   });
   expect(view.summary.coverage).toEqual(report.coverage);
-  expect(view.summary.signature_resolution).toBe("type-names-v1");
+  expect(view.summary.signature_resolution).toBe("type-names-v2");
   expect(view.summary.identity_scope).toEqual(report.identity_scope);
   expect(view.summary).not.toHaveProperty("methods");
   for (const detail of [undefined, "complete"]) {
@@ -164,7 +169,7 @@ it("summarizes selected members and pages every original collection after the fi
       if (page.kind !== "managed-members")
         throw new Error("Unexpected page kind");
       expect(page.page.collection).toBe(collection);
-      expect(page.signature_resolution).toBe("type-names-v1");
+      expect(page.signature_resolution).toBe("type-names-v2");
       expect(page.selection).toEqual(report.selection);
       expect(page.coverage.total).toBe(rows.length);
       paged.push(...page.page.rows);

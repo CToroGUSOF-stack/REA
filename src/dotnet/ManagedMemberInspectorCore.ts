@@ -522,14 +522,23 @@ const readTypeSignature = (
   {
     layout,
     operands,
+    displayTypeName,
   }: {
     /** Validate each type operand against these tables, as specs require. */
     readonly layout?: ManagedMetadataLayout;
     /** Collect each type operand, to resolve it by name. */
     readonly operands?: TypeOperand[];
+    readonly displayTypeName?: SignatureDisplayTypeName | undefined;
   } = {},
 ): { readonly value: string; readonly next: number } => {
   const stack: TypeContinuation[] = [];
+  const namedOperand = (kind: string, codedIndex: number): string => {
+    // Every enclosing continuation can copy the expanded name once (twice
+    // for modifier runs). Let the caller admit expansion before allocation.
+    const name = displayTypeName?.(codedIndex, (stack.length + 1) * 2);
+    const raw = `${kind}:${String(codedIndex)}`;
+    return name === undefined || name === null ? raw : `${raw} (${name})`;
+  };
   let cursor = offset;
   for (;;) {
     let value: string | undefined;
@@ -556,7 +565,10 @@ const readTypeSignature = (
     } else if (kind === 0x1f || kind === 0x20) {
       const token = readTypeOperand(blob, cursor + 1, layout);
       operands?.push({ offset: cursor + 1, ...token });
-      const modifier = `${kind === 0x1f ? "modreq" : "modopt"}:${String(token.value)}`;
+      const modifier = namedOperand(
+        kind === 0x1f ? "modreq" : "modopt",
+        token.value,
+      );
       // A modifier frame on top was pushed by the directly preceding byte;
       // keep an adjacent run together and in source order.
       const top = stack.at(-1);
@@ -566,7 +578,7 @@ const readTypeSignature = (
     } else if (kind === 0x11 || kind === 0x12) {
       const token = readTypeOperand(blob, cursor + 1, layout);
       operands?.push({ offset: cursor + 1, ...token });
-      value = `${kind === 0x11 ? "valuetype" : "class"}:${String(token.value)}`;
+      value = namedOperand(kind === 0x11 ? "valuetype" : "class", token.value);
       cursor = token.next;
     } else if (kind === 0x1e || kind === 0x13) {
       const variable = readCompressed(blob, cursor + 1);
@@ -593,7 +605,10 @@ const readTypeSignature = (
           "generic instantiation has no type arguments",
           token.next,
         );
-      const head = `${generic === 0x11 ? "valuetype" : "class"}:${String(token.value)}`;
+      const head = namedOperand(
+        generic === 0x11 ? "valuetype" : "class",
+        token.value,
+      );
       stack.push({
         kind: "list",
         remaining: argumentCount.value,
@@ -746,6 +761,7 @@ type DecodedSignature = Omit<
 const decodeSignature = (
   blob: Buffer,
   operands: TypeOperand[] = [],
+  displayTypeName?: SignatureDisplayTypeName,
 ): DecodedSignature => {
   try {
     if (blob.length === 0)
@@ -754,7 +770,10 @@ const decodeSignature = (
     // FieldSig (II.23.2.4) is exactly FIELD; a flagged FIELD header is not a
     // method header either, so it is malformed below.
     if (first === 0x06) {
-      const fieldType = readTypeSignature(blob, 1, "field", { operands });
+      const fieldType = readTypeSignature(blob, 1, "field", {
+        operands,
+        displayTypeName,
+      });
       return {
         kind: "field",
         parse_status: fieldType.next === blob.length ? "decoded" : "partial",
@@ -771,12 +790,14 @@ const decodeSignature = (
     const header = readMethodSignatureHeader(blob, 0, "member");
     const returnType = readTypeSignature(blob, header.next, "return", {
       operands,
+      displayTypeName,
     });
     let offset = returnType.next;
     const parameters: string[] = [];
     for (let index = 0; index < header.parameterCount; index += 1) {
       const parameter = readTypeSignature(blob, offset, "parameter", {
         operands,
+        displayTypeName,
       });
       parameters.push(parameter.value);
       offset = parameter.next;
@@ -851,6 +872,12 @@ export const signatureGenericArity = (
  */
 export type SignatureTypeName = (codedIndex: number) => Buffer | null;
 
+/** Readable name; copies bounds transient expansion through enclosing forms. */
+export type SignatureDisplayTypeName = (
+  codedIndex: number,
+  copies: number,
+) => string | null;
+
 /**
  * Each type operand is replaced by 0xff, which never starts a compressed
  * coded index, then the 32-byte name digest; a blob without type operands
@@ -887,9 +914,10 @@ export const signature = (
   blob: Buffer,
   rawSha256?: string,
   typeName: SignatureTypeName = () => null,
+  displayTypeName?: SignatureDisplayTypeName,
 ): ManagedSignature => {
   const operands: TypeOperand[] = [];
-  const decoded = decodeSignature(blob, operands);
+  const decoded = decodeSignature(blob, operands, displayTypeName);
   return {
     raw_length: blob.length,
     raw_sha256: rawSha256 ?? sha256Bytes(blob),

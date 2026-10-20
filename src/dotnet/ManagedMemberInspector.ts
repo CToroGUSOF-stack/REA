@@ -29,7 +29,7 @@ import {
   type TypeRange,
 } from "./ManagedMemberInspectorCore.js";
 import { edgeTargets } from "./ManagedMethodSpecs.js";
-import { managedTypeNameDigests } from "./ManagedTypeNameDigests.js";
+import { managedSignatureTypeNames } from "./ManagedSignatureTypeNames.js";
 import { typeNameLookup } from "./ManagedTypeNames.js";
 import { managedTypeReferences } from "./ManagedTypeReferences.js";
 import { parseUserStrings } from "./ManagedUserStrings.js";
@@ -74,7 +74,7 @@ const unavailable = (
         requires_mvid: null,
       },
       types: [],
-      signature_resolution: "type-names-v1",
+      signature_resolution: "type-names-v2",
       nesting_read: false,
       exported_types: null,
       user_strings: null,
@@ -209,7 +209,7 @@ export const inspectManagedMembersBytes = (
     const exportedTypes = parseExportedTypes(bytes, layout);
     appendManagedParseIssues(issues, exportedTypes.issues);
     const typeReferences = managedTypeReferences(bytes, layout, issues);
-    const signatureTypeName = managedTypeNameDigests(
+    const signatureTypeName = managedSignatureTypeNames(
       layout,
       issues,
       parsedTypes,
@@ -273,9 +273,9 @@ export const inspectManagedMembersBytes = (
         return {
           ...type,
           name_sha256:
-            signatureTypeName(
-              Number.parseInt(type.token.slice(4), 16) * 4,
-            )?.toString("hex") ?? null,
+            signatureTypeName
+              .digest(Number.parseInt(type.token.slice(4), 16) * 4)
+              ?.toString("hex") ?? null,
         };
       });
     const unnamedTypes = types.reduce(
@@ -304,7 +304,7 @@ export const inspectManagedMembersBytes = (
             requires_mvid: inventory.module?.mvid ?? null,
           },
           types,
-          signature_resolution: "type-names-v1",
+          signature_resolution: "type-names-v2",
           nesting_read: parsedTypes.nesting.complete,
           exported_types: exportedTypes.exportedTypes,
           fields: fields.fields,
@@ -331,7 +331,7 @@ export const inspectManagedMembersBytes = (
             "CIL instruction anchors are decoded from file-backed method bodies only; no target assembly is loaded or executed.",
             "Exported types are reported from ExportedType rows as declared; forwarded types are not resolved in their implementing assemblies.",
             "User strings are the #US literals loaded by ldstr in the inspected method bodies, with their own coverage; instruction anchors and normalized CIL digests keep their build-local tokens.",
-            "Member signatures decode ECMA-335 primitive, class, valuetype, generic instantiation, generic variable, pointer, byref, single-dimension and general array, function pointer, custom modifier, and typed reference forms; class and valuetype operands keep their encoded TypeDefOrRefOrSpec values, and unsupported forms such as vararg sentinels retain raw signature hashes.",
+            "Member signatures decode ECMA-335 primitive, class, valuetype, generic instantiation, generic variable, pointer, byref, single-dimension and general array, function pointer, custom modifier, and typed reference forms; type operands keep their encoded TypeDefOrRefOrSpec values and append readable TypeDef/TypeRef names when resolved, and unsupported forms such as vararg sentinels retain raw signature hashes.",
             ...(selection === null
               ? []
               : [

@@ -37,6 +37,7 @@ const NESTED = Buffer.from([1]);
 const NAME_SEPARATOR = Buffer.from([0]);
 
 interface NamedRow {
+  readonly name: string;
   readonly digest: Buffer;
   readonly depth: number;
 }
@@ -46,14 +47,14 @@ interface NamedRow {
  * type hashes its namespace and name, each framed, and a nested type hashes
  * its enclosing type's digest and its own namespace and name, as
  * `Outer/Inner` would read. Each
- * row is read and digested once, so naming a chain is linear in its length.
+ * row is read and digested once; expanded display paths are admitted before joining.
  * A gap, a cycle, or nesting deeper than `MAX_TYPE_NESTING_DEPTH` has no
- * digest. `retain` is charged once per row read and once per remembered row.
+ * name or digest. `retain` charges row bookkeeping and retained display bytes.
  */
-export const nestedTypeDigests = (
+export const nestedTypeNames = (
   link: (row: number) => TypeLink | null,
-  retain: () => void,
-): ((row: number) => Buffer | null) => {
+  retain: (bytes?: number) => void,
+): ((row: number) => NamedRow | null) => {
   const named = new Map<number, NamedRow | null>();
   const remember = (row: number, value: NamedRow | null): void => {
     retain();
@@ -123,10 +124,22 @@ export const nestedTypeDigests = (
         .update(step.link.namespace)
         .update(NAME_SEPARATOR)
         .update(step.link.name);
-      inner = { digest: hash.digest(), depth };
+      // Admit the expanded path before joining it; shared parents still
+      // occupy space in each retained child's name.
+      const ownLength =
+        step.link.namespace.length +
+        step.link.name.length +
+        (step.link.namespace.length === 0 ? 0 : 1);
+      retain(((inner?.name.length ?? -1) + 1 + ownLength) * 6 + 2);
+      const ownName =
+        step.link.namespace.length === 0
+          ? step.link.name
+          : `${step.link.namespace}.${step.link.name}`;
+      const name = inner === null ? ownName : `${inner.name}/${ownName}`;
+      inner = { digest: hash.digest(), name, depth };
       remember(step.row, inner);
     }
-    return exceeded ? null : (inner?.digest ?? null);
+    return exceeded ? null : inner;
   };
 };
 
@@ -139,19 +152,24 @@ export const nestedTypeDigests = (
  * unreadable row, cyclic nesting, or nesting deeper than the cap has no name,
  * so its declaration and signature operands have no resolved digest; an unreadable row's failure is
  * retained in `issues`, once per row. Each coded index and each row is
- * named and digested once, so repeated operands cost a lookup.
+ * named and digested once, so repeated operands cost a lookup. Display names
+ * share the digest owner's nesting and validity decisions.
  */
-export const managedTypeNameDigests = (
+export const managedSignatureTypeNames = (
   layout: ManagedMetadataLayout,
   issues: ManagedParseIssue[],
   parsedTypes: Pick<ReturnType<typeof parseTypes>, "types" | "nesting">,
   reference: ManagedTypeReferenceLookup,
-): SignatureTypeName => {
-  const retain = () => managedDecodeBudget(layout).reserve(128, null);
+): {
+  readonly digest: SignatureTypeName;
+  readonly displayName: (codedIndex: number) => string | null;
+} => {
+  const retain = (bytes = 128) =>
+    managedDecodeBudget(layout).reserve(bytes, null);
   managedDecodeBudget(layout).reserve(parsedTypes.types.length * 128, null);
   const types = new Map<string, (typeof parsedTypes.types)[number]>();
   for (const type of parsedTypes.types) types.set(type.token, type);
-  const definitions = nestedTypeDigests((row) => {
+  const definitions = nestedTypeNames((row) => {
     if (!parsedTypes.nesting.complete) return null;
     const type = types.get(metadataToken(TYPE_DEF, row));
     if (
@@ -191,21 +209,25 @@ export const managedTypeNameDigests = (
       enclosingRow,
     };
   }, retain);
-  const references = nestedTypeDigests((row) => {
+  const references = nestedTypeNames((row) => {
     const value = reference(row);
     return value?.scopeValid === true ? value : null;
   }, retain);
-  const digests = new Map<number, Buffer | null>();
-  return (codedIndex) => {
-    let digest = digests.get(codedIndex);
-    if (digest === undefined) {
+  const names = new Map<number, NamedRow | null>();
+  const resolve = (codedIndex: number): NamedRow | null => {
+    let named = names.get(codedIndex);
+    if (named === undefined) {
       managedDecodeBudget(layout).reserve(256, null);
       const row = codedIndex >>> 2;
       const table = codedIndex & 3;
-      digest =
+      named =
         table === 0 ? definitions(row) : table === 1 ? references(row) : null;
-      digests.set(codedIndex, digest);
+      names.set(codedIndex, named);
     }
-    return digest;
+    return named;
+  };
+  return {
+    digest: (codedIndex) => resolve(codedIndex)?.digest ?? null,
+    displayName: (codedIndex) => resolve(codedIndex)?.name ?? null,
   };
 };

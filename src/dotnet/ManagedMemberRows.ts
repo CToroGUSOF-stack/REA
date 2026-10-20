@@ -17,7 +17,6 @@ import {
   type ManagedMemberRef,
   type ManagedMethod,
   type MemberCore,
-  type SignatureTypeName,
   type TypeRange,
 } from "./ManagedMemberInspectorCore.js";
 import {
@@ -29,6 +28,7 @@ import {
   readMetadataString,
 } from "./ManagedMetadataHeaps.js";
 import { readManagedValue } from "./ManagedReaderFailure.js";
+import type { managedSignatureTypeNames } from "./ManagedSignatureTypeNames.js";
 import { methodBody } from "./ManagedMethodBodyReader.js";
 import { memberDeclaringTypeRowLookup } from "./ManagedMemberOwnership.js";
 import type { TypeMemberListFacts } from "./ManagedTypeMemberLists.js";
@@ -54,7 +54,7 @@ export const parseFields = (
     signatureTypeName,
     selected = null,
   }: {
-    readonly signatureTypeName: SignatureTypeName;
+    readonly signatureTypeName: ReturnType<typeof managedSignatureTypeNames>;
     readonly selected?: SelectedTypeTokens;
   },
 ): {
@@ -188,7 +188,7 @@ export const parseMemberRefs = (
   bytes: Buffer,
   layout: ManagedMetadataLayout,
   typeName: (token: string | null) => string | null,
-  signatureTypeName: SignatureTypeName,
+  signatureTypeName: ReturnType<typeof managedSignatureTypeNames>,
 ): {
   readonly refs: readonly ManagedMemberRef[];
   readonly core: ReadonlyMap<string, MemberCore>;
@@ -266,7 +266,7 @@ interface ParseMethodsInput {
   readonly layout: ManagedMetadataLayout;
   readonly pe: ManagedPeLayout;
   readonly ranges: readonly TypeRange[];
-  readonly signatureTypeName: SignatureTypeName;
+  readonly signatureTypeName: ReturnType<typeof managedSignatureTypeNames>;
   readonly memberLists: TypeMemberListFacts;
   readonly selected?: SelectedTypeTokens;
   readonly methodOffset?: number;
@@ -489,13 +489,26 @@ const callerNameBytes = (method: ManagedMethod): number =>
 const budgetedSignature = (
   bytes: Buffer,
   layout: ManagedMetadataLayout,
-  signatureTypeName: SignatureTypeName,
+  signatureTypeName: ReturnType<typeof managedSignatureTypeNames>,
 ): ReturnType<typeof signature> => {
   const budget = managedDecodeBudget(layout);
   budget.admitTransient(bytes.length * 256, layout.blob.offset);
   try {
     return admitManagedProjection(
-      signature(bytes, budget.digest(bytes, "sha256"), signatureTypeName),
+      signature(
+        bytes,
+        budget.digest(bytes, "sha256"),
+        signatureTypeName.digest,
+        (codedIndex, copies) => {
+          const name = signatureTypeName.displayName(codedIndex);
+          if (name !== null)
+            budget.admitTransient(
+              (name.length * 6 + 2) * copies,
+              layout.blob.offset,
+            );
+          return name;
+        },
+      ),
       budget,
     );
   } finally {

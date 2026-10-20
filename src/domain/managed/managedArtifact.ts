@@ -458,11 +458,11 @@ export const managedArtifactInspectionSchema = z.object({
 /** Provider-neutral, execution-free metadata/signature/IL member inspection. */
 export const managedMemberInspectionSchema = z.object({
   signature_resolution: z
-    .literal("type-names-v1")
+    .enum(["type-names-v1", "type-names-v2"])
     .nullable()
     .default(null)
     .describe(
-      "Signature type-name resolution was examined, including unresolved operands; null means historical Evidence without this attestation.",
+      "Signature type-name resolution was examined, including unresolved operands; v2 also renders readable operand names, v1 retains raw operand text; null means historical Evidence without this attestation.",
     ),
   artifact: z.object({
     path: z.string().min(1),
