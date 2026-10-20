@@ -20,7 +20,7 @@ export const WAKARU_PROVIDER_IDENTITY = {
   version: WAKARU_RELEASE.version,
 } as const;
 
-/** Per-operation resource bounds for the verified Linux adapter. */
+/** Per-operation resource bounds shared by the verified adapters. */
 export const RECOVERY_LIMITS = {
   inputBytes: 64 * 1024 * 1024,
   outputBytes: 128 * 1024 * 1024,
@@ -30,11 +30,24 @@ export const RECOVERY_LIMITS = {
   timeoutMs: 120000,
 } as const;
 
-/** Public limitations for transformations and extraction provenance. */
-export const RECOVERY_LIMITATIONS = [
+const COMMON_LIMITATIONS = [
   "Recovered sources are derived artifacts; original variable names and runtime equivalence are not established.",
   "Extraction ranges refer to half-open UTF-8 byte offsets in the original input, not rewritten line positions or whole-bundle coverage.",
   "Emitted source maps are preserved as reported by the engine; their mapping accuracy is not independently established.",
   "Inspection mode may produce non-executable regions. No input or recovered application code is executed.",
-  "Linux adapter: one worker, 1 GiB address-space ceiling, 120-second deadline, 64 MiB total input, 128 MiB output, 10000 output entries and 8 MiB per diagnostic/report stream. Resource limits are per operation, not aggregate host containment.",
 ] as const;
+
+const RESOURCE_LIMITATIONS = {
+  prlimit:
+    "Linux adapter: one worker, 1 GiB address-space ceiling, 120-second deadline, 64 MiB total input, 128 MiB output, 10000 output entries and 8 MiB per diagnostic/report stream. Resource limits are per operation, not aggregate host containment.",
+  "shell-ulimit":
+    "macOS adapter: one worker, 120-second CPU and wall-clock deadline, 64 MiB total input, 128 MiB output, 10000 output entries and 8 MiB per diagnostic/report stream. Output file size, core dumps and CPU time are limited through the shell; macOS cannot enforce an address-space ceiling, so memory use is not capped. Resource limits are per operation, not aggregate host containment.",
+} as const;
+
+/** Public limitations for transformations, extraction provenance and the host's resource limiter. */
+export const recoveryLimitations = (
+  limiterKind: keyof typeof RESOURCE_LIMITATIONS = "prlimit",
+) => [...COMMON_LIMITATIONS, RESOURCE_LIMITATIONS[limiterKind]] as const;
+
+/** Limitations for the Linux adapter, the original verified host. */
+export const RECOVERY_LIMITATIONS = recoveryLimitations("prlimit");

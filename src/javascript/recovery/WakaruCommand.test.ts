@@ -1,4 +1,7 @@
 import { EventEmitter } from "node:events";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { expect, it } from "vitest";
 import { AnalysisCapabilityUnavailableError } from "../../domain/analysisErrorCore.js";
@@ -8,7 +11,11 @@ import {
   runWakaruCommand,
   type WakaruLauncher,
 } from "./WakaruCommand.js";
-import { RECOVERY_LIMITS } from "./WakaruRelease.js";
+import {
+  RECOVERY_LIMITATIONS,
+  RECOVERY_LIMITS,
+  recoveryLimitations,
+} from "./WakaruRelease.js";
 
 it("names the Wakaru configuration requirement when it is not configured", async () => {
   const refusal: unknown = await resolveWakaruCommand({}).catch(
@@ -170,3 +177,156 @@ it("honors cancellation while waiting for output after exit", async () => {
     producer.stderr.destroy();
   }
 });
+
+const posixOnly = it.skipIf(process.platform === "win32");
+
+const withExecutable = async (
+  body: string,
+  use: (path: string) => Promise<void>,
+) => {
+  const root = await mkdtemp(join(tmpdir(), "rea-wakaru-host-"));
+  try {
+    const path = join(root, "wakaru");
+    await writeFile(path, body);
+    await chmod(path, 0o700);
+    await use(path);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+};
+
+it("refuses hosts without a verified resource limiter and names the supported hosts", async () => {
+  const refusal: unknown = await resolveWakaruCommand(
+    { REA_WAKARU_COMMAND: "/selected/wakaru" },
+    { platform: "win32", arch: "x64" },
+  ).catch((cause: unknown) => cause);
+
+  if (!(refusal instanceof AnalysisCapabilityUnavailableError))
+    throw new Error("Expected a capability refusal");
+  expect(refusal.reason).toContain("Linux x64 or macOS arm64");
+});
+
+posixOnly(
+  "selects the shell limiter on macOS arm64 without requiring prlimit",
+  async () => {
+    await withExecutable("#!/bin/sh\n", async (command) => {
+      await expect(
+        resolveWakaruCommand(
+          { REA_WAKARU_COMMAND: command },
+          { platform: "darwin", arch: "arm64" },
+        ),
+      ).resolves.toMatchObject({
+        limiter: "/bin/sh",
+        limiterKind: "shell-ulimit",
+      });
+    });
+  },
+);
+
+posixOnly("ignores the prlimit override on macOS", async () => {
+  await withExecutable("#!/bin/sh\n", async (command) => {
+    await expect(
+      resolveWakaruCommand(
+        {
+          REA_WAKARU_COMMAND: command,
+          REA_JAVASCRIPT_PRLIMIT_COMMAND: "relative/prlimit",
+        },
+        { platform: "darwin", arch: "arm64" },
+      ),
+    ).resolves.toMatchObject({ limiter: "/bin/sh" });
+  });
+});
+
+it("keeps the Linux limiter invocation unchanged", async () => {
+  const seen: string[][] = [];
+  const { context } = commandFixture((producer) => {
+    producer.stdout.end();
+    producer.stderr.end();
+    producer.emit("exit", 0, null);
+    producer.emit("close", 0, null);
+  });
+  await runWakaruCommand({
+    ...context,
+    launcher: async (options) => {
+      seen.push([options.command, ...options.arguments]);
+      return context.launcher(options);
+    },
+  });
+  expect(seen[0]).toEqual([
+    "/usr/bin/prlimit",
+    `--as=${String(RECOVERY_LIMITS.addressSpaceBytes)}`,
+    `--fsize=${String(RECOVERY_LIMITS.outputBytes)}`,
+    "--core=0",
+    "--cpu=120",
+    "--",
+    "/selected/wakaru",
+    "--version",
+  ]);
+});
+
+it("passes the engine to the shell limiter as positional arguments, not interpolated text", async () => {
+  const seen: string[][] = [];
+  const { context } = commandFixture((producer) => {
+    producer.stdout.end();
+    producer.stderr.end();
+    producer.emit("exit", 0, null);
+    producer.emit("close", 0, null);
+  });
+  await runWakaruCommand({
+    ...context,
+    command: "/path with spaces/$(touch pwned)/wakaru",
+    limiter: "/bin/sh",
+    limiterKind: "shell-ulimit",
+    arguments: ["--version", "a;b"],
+    launcher: async (options) => {
+      seen.push([options.command, ...options.arguments]);
+      return context.launcher(options);
+    },
+  });
+  const [command, flag, script, zero, ...rest] = seen[0] ?? [];
+  expect(command).toBe("/bin/sh");
+  expect(flag).toBe("-c");
+  expect(script).toContain("ulimit -f 262144");
+  expect(script).toContain("ulimit -c 0");
+  expect(script).toContain("ulimit -t 120");
+  expect(script).toContain('exec "$0" "$@"');
+  expect(script).not.toContain("pwned");
+  expect(zero).toBe("/path with spaces/$(touch pwned)/wakaru");
+  expect(rest).toEqual(["--version", "a;b"]);
+});
+
+it("states on macOS that no memory ceiling is enforced and keeps Linux wording unchanged", () => {
+  expect(recoveryLimitations("prlimit")).toEqual(RECOVERY_LIMITATIONS);
+  expect(RECOVERY_LIMITATIONS.at(-1)).toContain("1 GiB address-space ceiling");
+  const mac = recoveryLimitations("shell-ulimit");
+  expect(mac.slice(0, -1)).toEqual(RECOVERY_LIMITATIONS.slice(0, -1));
+  expect(mac.at(-1)).toContain("macOS adapter");
+  expect(mac.at(-1)).toContain("memory use is not capped");
+  expect(mac.at(-1)).not.toContain("1 GiB address-space ceiling");
+});
+
+it.skipIf(process.platform !== "darwin" || process.arch !== "arm64")(
+  "applies the output, core and CPU limits before starting the engine on macOS",
+  async () => {
+    await withExecutable(
+      "#!/bin/sh\nulimit -f\nulimit -c\nulimit -t\n",
+      async (command) => {
+        const result = await runWakaruCommand({
+          command,
+          limiter: "/bin/sh",
+          limiterKind: "shell-ulimit",
+          arguments: [],
+          cwd: tmpdir(),
+          environment: process.env,
+          deadline: performance.now() + 10_000,
+        });
+        expect(result.exit_code).toBe(0);
+        expect(result.stdout.trim().split("\n")).toEqual([
+          String(RECOVERY_LIMITS.outputBytes / 512),
+          "0",
+          String(RECOVERY_LIMITS.timeoutMs / 1000),
+        ]);
+      },
+    );
+  },
+);

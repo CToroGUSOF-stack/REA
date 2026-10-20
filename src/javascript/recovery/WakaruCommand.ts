@@ -26,7 +26,50 @@ import { RECOVERY_LIMITS } from "./WakaruRelease.js";
 
 const OPERATION = "recover_javascript_sources";
 const WAKARU_REQUIREMENT =
-  "Provide an absolute REA_WAKARU_COMMAND pointing to a Wakaru ^1.13.0 Linux x64 binary (verified with 1.14.0); no tool is installed by REA. See docs/javascript-recovery.md#install-wakaru.";
+  "Provide an absolute REA_WAKARU_COMMAND pointing to a Wakaru ^1.13.0 binary for this host (Linux x64 or macOS arm64; verified with 1.14.0); no tool is installed by REA. See docs/javascript-recovery.md#install-wakaru.";
+
+/** Host identity used to choose how Wakaru's resource limits are applied. */
+export type WakaruHost = { platform: NodeJS.Platform; arch: string };
+
+/**
+ * How resource limits are applied to the engine:
+ * - `prlimit`: util-linux `prlimit` (Linux x64) caps address space, output size, core dumps and CPU time.
+ * - `shell-ulimit`: `/bin/sh` `ulimit` (macOS arm64) caps output size, core dumps and CPU time.
+ *   macOS rejects address-space limits, so no memory ceiling is enforced there.
+ */
+export type WakaruLimiterKind = "prlimit" | "shell-ulimit";
+
+const SHELL_LIMITER = "/bin/sh";
+
+const limiterKindFor = (host: WakaruHost): WakaruLimiterKind | null => {
+  if (host.platform === "linux" && host.arch === "x64") return "prlimit";
+  if (host.platform === "darwin" && host.arch === "arm64")
+    return "shell-ulimit";
+  return null;
+};
+
+/**
+ * `ulimit -f` counts 512-byte blocks. Every limit must apply before Wakaru starts:
+ * a failed `ulimit` stops the `&&` chain, so the engine never runs unbounded.
+ */
+const SHELL_LIMIT_SCRIPT = `ulimit -f ${String(Math.ceil(RECOVERY_LIMITS.outputBytes / 512))} && ulimit -c 0 && ulimit -t ${String(RECOVERY_LIMITS.timeoutMs / 1000)} && exec "$0" "$@"`;
+
+const limitedInvocation = (
+  kind: WakaruLimiterKind,
+  command: string,
+  commandArguments: readonly string[],
+): string[] =>
+  kind === "shell-ulimit"
+    ? ["-c", SHELL_LIMIT_SCRIPT, command, ...commandArguments]
+    : [
+        `--as=${String(RECOVERY_LIMITS.addressSpaceBytes)}`,
+        `--fsize=${String(RECOVERY_LIMITS.outputBytes)}`,
+        "--core=0",
+        "--cpu=120",
+        "--",
+        command,
+        ...commandArguments,
+      ];
 
 /** Inject the owned process launcher while retaining production protocol parsing. */
 export type WakaruLauncher = (
@@ -61,11 +104,12 @@ export class WakaruCleanupFailure extends ProviderCleanupError {
 /** Resolve and fingerprint explicitly configured tools; acquire nothing at startup. */
 export const resolveWakaruCommand = async (
   environment: Readonly<Record<string, string | undefined>>,
+  host: WakaruHost = { platform: process.platform, arch: process.arch },
 ) => {
   const configured = environment.REA_WAKARU_COMMAND;
+  const limiterKind = limiterKindFor(host);
   if (
-    process.platform !== "linux" ||
-    process.arch !== "x64" ||
+    limiterKind === null ||
     configured === undefined ||
     !isAbsolute(configured)
   )
@@ -83,15 +127,17 @@ export const resolveWakaruCommand = async (
       RECOVERY_LIMITS.outputBytes,
     );
     const limiter =
-      environment.REA_JAVASCRIPT_PRLIMIT_COMMAND ?? "/usr/bin/prlimit";
+      limiterKind === "shell-ulimit"
+        ? SHELL_LIMITER
+        : (environment.REA_JAVASCRIPT_PRLIMIT_COMMAND ?? "/usr/bin/prlimit");
     if (!isAbsolute(limiter))
       throw new TypeError("REA_JAVASCRIPT_PRLIMIT_COMMAND must be absolute");
     await access(limiter, constants.X_OK);
     if (!(await stat(limiter)).isFile())
       throw new TypeError(`Resource limiter is not a regular file: ${limiter}`);
-    return { command, limiter, ...fingerprint };
+    return { command, limiter, limiterKind, ...fingerprint };
   } catch (cause: unknown) {
-    const reason = `Configured Wakaru or util-linux prlimit is unavailable: ${recoveryFailureMessage(cause)}`;
+    const reason = `Configured Wakaru or ${limiterKind === "shell-ulimit" ? SHELL_LIMITER : "util-linux prlimit"} is unavailable: ${recoveryFailureMessage(cause)}`;
     throw new AnalysisCapabilityUnavailableError("wakaru", OPERATION, reason, {
       cause,
       userMessage: reason,
@@ -102,6 +148,8 @@ export const resolveWakaruCommand = async (
 type WakaruCommandContext = {
   command: string;
   limiter: string;
+  /** Defaults to `prlimit`, the original Linux behavior. */
+  limiterKind?: WakaruLimiterKind;
   arguments: readonly string[];
   cwd: string;
   deadline: number;
@@ -117,15 +165,11 @@ export const runWakaruCommand = async (context: WakaruCommandContext) => {
   const runId = `rea-wakaru-${randomUUID()}`;
   const spawned = await (context.launcher ?? spawnOwnedProviderProcess)({
     command: context.limiter,
-    arguments: [
-      `--as=${String(RECOVERY_LIMITS.addressSpaceBytes)}`,
-      `--fsize=${String(RECOVERY_LIMITS.outputBytes)}`,
-      "--core=0",
-      "--cpu=120",
-      "--",
+    arguments: limitedInvocation(
+      context.limiterKind ?? "prlimit",
       context.command,
-      ...context.arguments,
-    ],
+      context.arguments,
+    ),
     expectedCommand: null,
     runId,
     cwd: context.cwd,
@@ -138,7 +182,7 @@ export const runWakaruCommand = async (context: WakaruCommandContext) => {
     throw new ProviderAdapterError("wakaru", OPERATION, {
       cause,
       diagnostics: {
-        reason: "Failed to launch configured Wakaru through util-linux prlimit",
+        reason: `Failed to launch configured Wakaru through ${context.limiterKind === "shell-ulimit" ? SHELL_LIMITER : "util-linux prlimit"}`,
         command: context.command,
         detail: recoveryFailureMessage(cause),
       },

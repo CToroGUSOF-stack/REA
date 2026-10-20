@@ -7,7 +7,7 @@ never executes the selected or recovered application code.
 
 ## Caller-supplied engine
 
-REA accepts Wakaru **^1.13.0** on Linux x64. The report parser is verified with
+REA accepts Wakaru **^1.13.0** on Linux x64 and macOS arm64. The report parser is verified with
 Wakaru **1.14.0**. Another release in that range is accepted, the observed
 version is reported, and a limitation records that the parser was not verified
 against that release. Wakaru changes `--version`, `--json` and `provenance.json`
@@ -16,9 +16,15 @@ only by addition within a major version
 so the parser keeps unknown report fields and reported module statuses.
 
 Set `REA_WAKARU_COMMAND` to the absolute path of an executable supplied by the
-caller. The adapter uses util-linux `prlimit` (default `/usr/bin/prlimit`;
-override with an absolute `REA_JAVASCRIPT_PRLIMIT_COMMAND`). REA does not install
-either tool. Engine configuration is checked only when recovery is requested;
+caller. On Linux the adapter uses util-linux `prlimit` (default `/usr/bin/prlimit`;
+override with an absolute `REA_JAVASCRIPT_PRLIMIT_COMMAND`). On macOS it applies
+the limits through `/bin/sh` `ulimit`. REA does not install either tool.
+
+macOS enforces the 120-second CPU limit, the 128 MiB output-file limit and
+disabled core dumps, but cannot set an address-space ceiling, so the 1 GiB
+memory cap that Linux applies is **not** enforced there. Results from a macOS
+host carry a limitation that says so. The limits are applied before Wakaru
+starts; if any cannot be set, Wakaru does not run. Engine configuration is checked only when recovery is requested;
 other REA capabilities remain available without it.
 
 Unmodified upstream source is retained in `third_party/wakaru`, pinned to
@@ -46,6 +52,13 @@ export REA_WAKARU_COMMAND="$(realpath node_modules/@wakaru/cli-linux-x64/wakaru)
 
 Both give the same binary (SHA-256
 `664fa06782a61eda7ed15885134b52525fd565dd77607e642062ceb6cd927c38`).
+
+On macOS arm64, install from npm and point at the darwin binary:
+
+```sh
+npm install wakaru@1.14.0
+export REA_WAKARU_COMMAND="$(realpath node_modules/@wakaru/cli-darwin-arm64/wakaru)"
+```
 
 ## Recover and analyze
 
