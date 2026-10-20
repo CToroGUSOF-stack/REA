@@ -37,6 +37,7 @@ import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import { createEvidence } from "../domain/evidence.js";
 import { jsonObjectSchema } from "../domain/jsonValue.js";
 import type { ToolResultDelivery } from "./toolResult.js";
+import { acceptStringifiedStructuredArguments } from "./toolRegistrationOptions.js";
 import { toolReturnsTargetContent } from "../contracts/toolEffects.js";
 import {
   carriesTargetContentMarker,
@@ -197,12 +198,20 @@ export class EvidenceMcpServer extends RequestTrackingMcpServer {
     callback: ToolCallback<InputArgs>,
   ): RegisteredTool {
     const budget = this.compactPresentation?.budgetBytes;
+    const recovered =
+      config?.inputSchema === undefined
+        ? undefined
+        : acceptStringifiedStructuredArguments(config.inputSchema);
+    const normalized =
+      recovered === undefined
+        ? config
+        : { ...config, inputSchema: recovered as InputArgs };
     const inputSchema =
       budget !== undefined &&
-      config !== undefined &&
-      hasAdvertisedInputJsonSchema(config.inputSchema)
+      normalized !== undefined &&
+      hasAdvertisedInputJsonSchema(normalized.inputSchema)
         ? transformAdvertisedInputJsonSchema(
-            config.inputSchema as Parameters<
+            normalized.inputSchema as Parameters<
               typeof transformAdvertisedInputJsonSchema
             >[0],
             (projected) =>
@@ -210,7 +219,7 @@ export class EvidenceMcpServer extends RequestTrackingMcpServer {
           )
         : undefined;
     const registeredConfig =
-      inputSchema === undefined ? config : { ...config, inputSchema };
+      inputSchema === undefined ? normalized : { ...normalized, inputSchema };
     return super.registerTool(
       name,
       registeredConfig as never,
