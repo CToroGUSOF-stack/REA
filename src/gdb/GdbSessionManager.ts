@@ -572,7 +572,11 @@ export class GdbSessionManager {
         ]),
       );
     if (this.#closing || signal?.aborted)
-      return err(new AnalysisCancelledError("start_gdb_session"));
+      return err(
+        new AnalysisCancelledError("start_gdb_session", {
+          cause: signal?.reason,
+        }),
+      );
     if (this.#platform !== "linux")
       return err(
         new AnalysisCapabilityUnavailableError(
@@ -607,7 +611,11 @@ export class GdbSessionManager {
     >
   > {
     if (signal?.aborted)
-      return err(new AnalysisCancelledError("start_gdb_session"));
+      return err(
+        new AnalysisCancelledError("start_gdb_session", {
+          cause: signal.reason,
+        }),
+      );
     const occupied = this.#sessions.size + this.#sessionReservations;
     if (occupied >= this.#maxSessions)
       return err(
@@ -689,7 +697,11 @@ export class GdbSessionManager {
       launched = await this.#spawnProcess(spawnOptions);
     } catch (cause) {
       if (signal?.aborted || cause instanceof AnalysisCancelledError)
-        return err(new AnalysisCancelledError("start_gdb_session", { cause }));
+        return err(
+          new AnalysisCancelledError("start_gdb_session", {
+            cause: signal?.aborted ? signal.reason : cause,
+          }),
+        );
       return err(
         new AnalysisCapabilityUnavailableError(
           "gdb",
@@ -786,7 +798,11 @@ export class GdbSessionManager {
         session.startupResolve = resolve;
         session.startupReject = reject;
         startupAbortListener = () =>
-          reject(new AnalysisCancelledError("start_gdb_session"));
+          reject(
+            new AnalysisCancelledError("start_gdb_session", {
+              cause: signal?.reason,
+            }),
+          );
         signal?.addEventListener("abort", startupAbortListener, {
           once: true,
         });
@@ -810,7 +826,9 @@ export class GdbSessionManager {
       });
       session.ready = true;
       if (signal?.aborted)
-        throw new AnalysisCancelledError("start_gdb_session");
+        throw new AnalysisCancelledError("start_gdb_session", {
+          cause: signal.reason,
+        });
       const autoLoad = await this.#request(
         session,
         "-gdb-set auto-load off",
@@ -864,11 +882,15 @@ export class GdbSessionManager {
         session.inferiorTtyVerified = true;
       }
       if (signal?.aborted)
-        throw new AnalysisCancelledError("start_gdb_session");
+        throw new AnalysisCancelledError("start_gdb_session", {
+          cause: signal.reason,
+        });
       // Give queued exit notifications a turn before publishing startup.
       await new Promise<void>((resolve) => setImmediate(resolve));
       if (signal?.aborted)
-        throw new AnalysisCancelledError("start_gdb_session");
+        throw new AnalysisCancelledError("start_gdb_session", {
+          cause: signal.reason,
+        });
       if (session.exited || session.protocolError !== undefined)
         throw new Error(
           session.protocolError ?? "GDB exited during startup readiness.",
@@ -995,7 +1017,12 @@ export class GdbSessionManager {
             new AnalysisTimeoutError(cause.operation, cause.timeoutMs, details),
           );
         if (cause instanceof AnalysisCancelledError)
-          return err(new AnalysisCancelledError(cause.operation, details));
+          return err(
+            new AnalysisCancelledError(cause.operation, {
+              ...details,
+              cause: signal?.aborted ? signal.reason : cause,
+            }),
+          );
         const startupFailureMessage = gdbErrorMessage(cause);
         return err(
           new AnalysisCapabilityUnavailableError(
@@ -1013,9 +1040,16 @@ export class GdbSessionManager {
           ? {}
           : { partialObservation: startupEvidence }),
       };
+      // A typed startup failure observed before the abort stays primary; only a
+      // cancellation cause (or an untyped abort) becomes cancellation.
+      const abortedWithoutFailure =
+        signal?.aborted === true && !(cause instanceof AnalysisError);
       const error =
-        signal?.aborted || cause instanceof AnalysisCancelledError
-          ? new AnalysisCancelledError("start_gdb_session", errorDetails)
+        cause instanceof AnalysisCancelledError || abortedWithoutFailure
+          ? new AnalysisCancelledError("start_gdb_session", {
+              ...errorDetails,
+              cause: signal?.aborted === true ? signal.reason : cause,
+            })
           : cause instanceof AnalysisTimeoutError
             ? new AnalysisTimeoutError(
                 cause instanceof GdbCommandTimeoutError
