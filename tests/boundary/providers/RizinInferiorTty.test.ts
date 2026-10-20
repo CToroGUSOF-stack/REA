@@ -539,7 +539,6 @@ async function startFakeInferiorSession(
     `#!/usr/bin/env node
 const fs = require("node:fs");
 const { spawn } = require("node:child_process");
-process.stdout.write("\\0");
 ${launchTarget ? `const ttyFlags = fs.constants.O_WRONLY | fs.constants.O_NOCTTY | fs.constants.O_NONBLOCK; const stdoutFd = fs.openSync(${JSON.stringify(tty)}, ttyFlags); const stderrFd = fs.openSync(${JSON.stringify(stderrPath)}, ttyFlags); const target = spawn(process.execPath, [${JSON.stringify(targetPath)}], { detached: true, stdio: ["ignore", stdoutFd, stderrFd] }); fs.closeSync(stdoutFd); fs.closeSync(stderrFd); target.unref(); const inferiorPid = target.pid; fs.writeFileSync(${JSON.stringify(pidPath)}, String(inferiorPid));` : "const inferiorPid = 999999999;"}
 const initialRows = ${JSON.stringify(initialRows)} ?? JSON.stringify([{ raised: true, fd: 3, uri: "ptrace://" + inferiorPid }]);
 const afterDetach = ${JSON.stringify(afterDetach(inferiorPid ?? 999999999))};
@@ -566,6 +565,8 @@ process.stdin.on("data", (chunk) => {
     else if (line.startsWith("!echo ")) process.stdout.write((truncateCleanupFrame ? "x".repeat(2_048) : "") + line.slice(6) + "\\0");
   }
 });
+// Publish readiness after the inferior identity and command handler are ready.
+process.stdout.write("\\0");
 `,
   );
   await chmod(provider, 0o700);

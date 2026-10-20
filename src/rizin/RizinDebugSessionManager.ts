@@ -581,6 +581,7 @@ export class RizinDebugSessionManager {
     let acquired = false;
     let commandSent = false;
     let commandCapture: RizinCommandCapture | undefined;
+    let commandCompleted = false;
     let interruption: RizinCommandInterruption | undefined;
     const commandResult = (
       capture: RizinCommandCapture,
@@ -672,6 +673,7 @@ export class RizinDebugSessionManager {
         throw interruption.cause;
       }
       const captured = received.value;
+      commandCompleted = !captured.outputTruncated;
       if (signal?.aborted)
         throw new AnalysisCancelledError("rizin_debug_command");
       let cleanupFailure: string | undefined;
@@ -730,13 +732,14 @@ export class RizinDebugSessionManager {
             };
       const partialEvidence = (
         limitations: readonly string[],
+        completion: "complete" | "unknown" = "unknown",
       ): Evidence | undefined =>
         partialResult === undefined
           ? undefined
           : createRizinCommandEvidence({
               sessionId,
               command,
-              result: partialResult,
+              result: { ...partialResult, completion_status: completion },
               inferiorTty: session.inferiorTty,
               launchProvenance: session.launchProvenance,
               limitations,
@@ -746,14 +749,22 @@ export class RizinDebugSessionManager {
           return err(
             new AnalysisCancelledError("rizin_debug_command", { cause }),
           );
-        const evidence = partialEvidence([
-          "The Rizin command was cancelled; collected frame output is partial and command completion is unknown.",
-          "The owned debugger session was stopped because command output can no longer be correlated safely.",
-          "The command is unrestricted and may access local files, the shell, network, or mutate the target.",
-        ]);
-        session.protocolError =
-          "A Rizin command was cancelled; the owned session was stopped because command output can no longer be correlated safely.";
+        if (!commandCompleted)
+          session.protocolError ??=
+            "A Rizin command was cancelled before its completion marker; output correlation is no longer safe.";
         const stopped = await this.#stopDebuggerOnly(session, true);
+        const evidence = partialEvidence(
+          [
+            commandCompleted
+              ? "Cancellation is reported with a confirmed Rizin command-completion marker; confirmed command output is retained."
+              : "The Rizin command was cancelled; collected frame output is partial and command completion is unknown.",
+            stopped.status === "incomplete"
+              ? `The owned debugger session remains retained because cleanup could not be verified: ${stopped.reason}`
+              : "Owned debugger process cleanup was verified; final target state remains unknown.",
+            "The command is unrestricted and may access local files, the shell, network, or mutate the target.",
+          ],
+          commandCompleted ? "complete" : "unknown",
+        );
         if (stopped.status === "incomplete")
           return err(
             this.#retainCleanupFailure(
@@ -1416,6 +1427,7 @@ const waitForCommandFrames = async (
   let outputInvalidUtf8 = false;
   let outputTruncated = false;
   let frameCount = 0;
+  let completionMarkerSeen = false;
   const snapshot = () => ({
     output: output.join("\n"),
     outputTruncated: outputTruncated || session.commandOutputDropped,
@@ -1457,6 +1469,7 @@ const waitForCommandFrames = async (
         break;
       }
       markerSeen = append(queued.frame);
+      completionMarkerSeen ||= markerSeen;
       if (markerSeen || outputTruncated) break;
     }
     if (!markerSeen && !outputTruncated && session.bufferedFrameBytes > 0)
@@ -1497,11 +1510,23 @@ const waitForCommandFrames = async (
         // `exit` observes the leader, not its pipe lifetime. Keep the bounded
         // receiver active until the supervisor observes output closure, using
         // the same settlement interval as owned-debugger cleanup.
-        drained = await session.supervisor.waitForOutputClose(
+        await session.supervisor.waitForOutputClose(
           CLEANUP_COMMAND_TIMEOUT_MS,
+          signal,
         );
+        // Cancellation may win the wait just before an already queued close.
+        drained = session.supervisor.observedOutputClose();
       }
       const captured = interrupted();
+      // Only complete NUL frames can establish completion. A marker in the
+      // unfinished frame, truncation or a genuine protocol failure cannot.
+      if (
+        cause instanceof RizinProcessExitError &&
+        completionMarkerSeen &&
+        !captured.outputTruncated &&
+        session.protocolError === undefined
+      )
+        return ok(captured);
       return err({
         kind:
           cause instanceof AnalysisCancelledError
