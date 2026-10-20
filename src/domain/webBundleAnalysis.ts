@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 import { emptyArraySchema } from "./emptyArraySchema.js";
-import { inspectWebPageWithSourceInputSchema } from "./browserObservation.js";
+import {
+  inspectWebPageWithSourceInputSchema,
+  recordedBrowserOriginSchema,
+} from "./browserObservation.js";
 import { webTextArtifactSchema } from "./webContentArtifact.js";
 
 /** Capture-and-analyze input with optional source-map fetching. */
@@ -185,6 +188,9 @@ export type WebSourceMaps = z.infer<typeof webSourceMapsSchema>;
 export const webBundleAnalysisSchema = z.object({
   capture: z.object({
     target_url: z.string(),
+    // Older saved observations omit this field; current analyses retain the
+    // validated HTTP(S) target origin or null when no browser origin exists.
+    target_origin: recordedBrowserOriginSchema.nullable().optional(),
     scripts_observed: z.number().int().min(0),
     scripts_analyzed: z.number().int().min(0),
     source_artifacts: z.array(webTextArtifactSummarySchema),
