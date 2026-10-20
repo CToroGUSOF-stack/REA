@@ -10,6 +10,7 @@ import {
   parseRecoveredJavaScript,
   parserPluginsForPath,
 } from "./javascript/javascriptSourceParser.js";
+import { readExactJavaScriptLiteral } from "./javascript/javascriptAstValues.js";
 import { unshadowedReferenceSourceRequireCalls } from "./referenceSourceRequireBindings.js";
 import { isRelativeJavaScriptModuleSpecifier } from "./javascript/javascriptModuleSpecifier.js";
 import {
@@ -66,6 +67,16 @@ export interface ReferenceSourceImportParseResult {
 export const PARSEABLE_REFERENCE_SOURCE_LANGUAGES: ReadonlySet<string> =
   new Set(["JavaScript", "TypeScript", "JSX", "TSX"]);
 
+const exactCommonJsSpecifier = (
+  node: Node | null | undefined,
+): string | undefined => {
+  if (node === null || node === undefined) return undefined;
+  const literal = readExactJavaScriptLiteral(node);
+  return literal.found && typeof literal.value === "string"
+    ? literal.value
+    : undefined;
+};
+
 const safeModuleName = (node: Node | null | undefined): string | undefined => {
   if (isStringLiteral(node)) return node.value;
   return undefined;
@@ -87,6 +98,12 @@ const isModuleExpression = (
 ): expression is StringLiteral | CallExpression =>
   isStringLiteral(expression) || isCallExpression(expression);
 
+const isRequireModuleExpression = (
+  expression: Node | null | undefined,
+): boolean =>
+  isModuleExpression(expression) ||
+  exactCommonJsSpecifier(expression) !== undefined;
+
 const moduleSpecifierFromExpression = (
   expression: Node | null | undefined,
 ):
@@ -106,6 +123,16 @@ const moduleSpecifierFromExpression = (
     return { specifier: "<dynamic-import>", parseState: "partial" };
   }
   return undefined;
+};
+
+const requireSpecifierFromExpression = (
+  expression: Node | null | undefined,
+):
+  | { specifier: string; parseState: ReferenceSourceImportParseState }
+  | undefined => {
+  const exact = exactCommonJsSpecifier(expression);
+  if (exact !== undefined) return { specifier: exact, parseState: "parsed" };
+  return moduleSpecifierFromExpression(expression);
 };
 
 const appendRelationship = (
@@ -250,9 +277,9 @@ const extractRequireAndDynamicImports = (
     if (
       isRequireCallee(call.callee) &&
       unshadowedRequireCalls.has(call) &&
-      isModuleExpression(first)
+      isRequireModuleExpression(first)
     ) {
-      const result = moduleSpecifierFromExpression(first);
+      const result = requireSpecifierFromExpression(first);
       if (result !== undefined) {
         appendRelationship(relationships, {
           fromPath: from_path,
