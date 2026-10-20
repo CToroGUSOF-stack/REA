@@ -98,6 +98,9 @@ const projectRefusal = (
     },
   );
 };
+// Without this the JVM leaves hsperfdata_<user> in the caller's temp directory.
+export const JADX_JVM_BASE_ARGUMENTS = ["-XX:-UsePerfData"] as const;
+
 /** Interpret one complete module listing before joining final cleanup. */
 export const inspectJadxJava = async (
   java: string,
@@ -113,7 +116,7 @@ export const inspectJadxJava = async (
         await runOwnedCommand(
           {
             command: java,
-            arguments: ["--list-modules"],
+            arguments: [...JADX_JVM_BASE_ARGUMENTS, "--list-modules"],
             runId: randomUUID(),
             expectedCommand: null,
             hostEnvironment: environment,

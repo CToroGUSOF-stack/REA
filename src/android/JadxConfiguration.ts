@@ -1,4 +1,8 @@
-import { inspectJadxJava, type JadxJavaProbeOptions } from "./JadxJavaProbe.js";
+import {
+  inspectJadxJava,
+  JADX_JVM_BASE_ARGUMENTS,
+  type JadxJavaProbeOptions,
+} from "./JadxJavaProbe.js";
 import {
   JadxInterruption,
   throwIfJadxInterrupted,
@@ -658,7 +662,7 @@ const requireJavaHomeExecutable = async (
 const resolveJvmArguments = (
   environment: Readonly<Record<string, string | undefined>>,
 ): readonly string[] => {
-  const result: string[] = [];
+  const result: string[] = [...JADX_JVM_BASE_ARGUMENTS];
   for (const [name, prefix, suffix] of [
     ["REA_JADX_HEAP_MIB", "-Xmx", "m"],
     ["REA_JADX_ACTIVE_PROCESSOR_COUNT", "-XX:ActiveProcessorCount=", ""],
