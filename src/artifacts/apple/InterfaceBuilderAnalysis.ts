@@ -579,6 +579,10 @@ const projectNibArchive = (
     if (!uiKit && !className.includes("Connector")) continue;
     const values = object.values;
     const connectionFields = interfaceBuilderConnectionFieldNames(className);
+    // AppKit tooltip, accessibility attribute and user-defined runtime
+    // attribute connectors also match by name, but they annotate one object
+    // and encode no NSSource at all. They are not connections.
+    if (!uiKit && !Object.hasOwn(values, connectionFields.source)) continue;
     const source = reference(values[connectionFields.source]);
     if (source === null) {
       unresolvedConnections += 1;
