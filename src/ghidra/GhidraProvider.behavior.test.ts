@@ -405,6 +405,40 @@ describe("Ghidra provider", () => {
   });
 });
 
+describe("Ghidra header-admitted ELF families", () => {
+  it("admits a parsed SPARC V9 ELF target and declines it on Windows", async () => {
+    const parsed = parseExecutableHeader(elf(2, 2, 43), "x64");
+    if (!parsed.ok) throw new Error("Expected valid SPARC V9 ELF target");
+    const target: BinaryTarget = {
+      path: "/tmp/sparcv9-bin",
+      sha256: "a".repeat(64),
+      kind: "executable",
+      ...parsed.value,
+    };
+    const ghidra = provider();
+    expect(ghidra.inspectTargetSupport(target)).toMatchObject({
+      status: "supported",
+    });
+    const resolved = await ghidra.resolveAnalysisProfile(target);
+    expect(resolved.ok && resolved.value).toMatchObject({
+      profile: {
+        parameters: {
+          target_format: "elf",
+          architecture: "sparc",
+          loader: "auto-from-header",
+          language_id: "auto-from-header",
+          compiler_spec_id: "auto-default",
+        },
+      },
+    });
+    const windows = provider(installationHost("win32"));
+    expect(windows.inspectTargetSupport(target)).toMatchObject({
+      status: "unsupported",
+      code: "target_format_unsupported",
+    });
+  });
+});
+
 describe("Ghidra raw-binary profile", () => {
   it("admits raw 6502 on Windows and binds its 16-bit language without mutation authority", async () => {
     const ghidra = provider(installationHost("win32"));

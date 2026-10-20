@@ -47,6 +47,11 @@ export type ExecutableMetadata =
       readonly availableArchitectures: readonly "hexagon"[];
     }
   | {
+      readonly format: "elf";
+      readonly architecture: "sparc";
+      readonly availableArchitectures: readonly "sparc"[];
+    }
+  | {
       readonly format: "mach-o" | "elf" | "dos-mz" | "dos-com";
       readonly architecture: HeaderArchitecture;
       readonly availableArchitectures: readonly HeaderArchitecture[];
@@ -252,7 +257,16 @@ const parseElf = (
           riscv: metadata,
         });
   }
+  // Neither family carries an ELF metadata member: `hexagon` selects one Ghidra
+  // language by machine value, and `sparc` is admitted only under the ELF64
+  // big-endian commitments that select its one language in `elfFixedHeader.ts`.
   if (architecture === "hexagon")
+    return ok({
+      format: "elf",
+      architecture,
+      availableArchitectures: [architecture],
+    });
+  if (architecture === "sparc")
     return ok({
       format: "elf",
       architecture,

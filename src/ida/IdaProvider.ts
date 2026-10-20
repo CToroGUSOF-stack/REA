@@ -3,6 +3,7 @@ import { createAnalysisProfile } from "../domain/analysisProfile.js";
 import type { AnalysisProfileCommitment } from "../domain/analysisProfile.js";
 import {
   isElfMetadataArchitecture,
+  isElfOnlyArchitecture,
   type BinaryTarget,
 } from "../domain/binaryTargetTypes.js";
 import { err, ok } from "../domain/result.js";
@@ -36,6 +37,15 @@ import { IdaSessionClient } from "./IdaSessionClient.js";
 import { privateRuntimeRootCapability } from "../process/PrivateRuntimeRoot.js";
 
 /** Bring-your-own IDA MCP candidate; discovery performs no provider startup. */
+/** Families whose only verified route is a Ghidra lane; IDA names each one. */
+const IDA_DECLINED_ARCHITECTURE_LABELS = {
+  mips: "MIPS",
+  riscv: "RISC-V",
+  powerpc: "PowerPC",
+  hexagon: "Hexagon",
+  sparc: "SPARC",
+} as const;
+
 export class IdaProvider implements AnalysisProviderCandidate {
   #registration: Result<IdaConfiguration, ConfigurationError> | undefined;
   private readonly environment: NodeJS.ProcessEnv;
@@ -112,19 +122,13 @@ export class IdaProvider implements AnalysisProviderCandidate {
     if (
       target.kind === "executable" &&
       (isElfMetadataArchitecture(target.architecture) ||
-        target.architecture === "hexagon")
+        isElfOnlyArchitecture(target.architecture))
     )
       return {
         status: "unsupported",
         code: "architecture_unsupported",
         reason: `REA's IDA adapter has no verified ${
-          target.architecture === "mips"
-            ? "MIPS"
-            : target.architecture === "riscv"
-              ? "RISC-V"
-              : target.architecture === "powerpc"
-                ? "PowerPC"
-                : "Hexagon"
+          IDA_DECLINED_ARCHITECTURE_LABELS[target.architecture]
         } lane. Select a supported Ghidra profile instead.`,
         diagnostics,
       };

@@ -62,12 +62,14 @@ export const readElfFixedHeader = (
     byteOrder: littleEndian ? "little" : "big",
     headerSize,
     machine,
-    architecture: elfArchitecture(machine) ?? null,
+    architecture: elfArchitecture(machine, elfClass, littleEndian) ?? null,
   });
 };
 
 const elfArchitecture = (
   machine: number,
+  elfClass: 32 | 64,
+  littleEndian: boolean,
 ): Exclude<BinaryArchitecture, RawOnlyArchitecture> | undefined => {
   switch (machine) {
     case 3:
@@ -80,6 +82,10 @@ const elfArchitecture = (
       return "powerpc";
     case 40:
       return "arm";
+    case 43:
+      // EM_SPARCV9 is admitted only under the ELF64 big-endian commitments,
+      // because those are the only header facts that select one Ghidra language.
+      return elfClass === 64 && !littleEndian ? "sparc" : undefined;
     case 164: // EM_HEXAGON: Qualcomm Hexagon DSP (QDSP6).
       return "hexagon";
     case 183:

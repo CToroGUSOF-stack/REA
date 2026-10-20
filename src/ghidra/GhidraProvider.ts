@@ -91,6 +91,7 @@ const SUPPORTED_ARCHITECTURES = new Set([
   "powerpc",
   "m68k",
   "hexagon",
+  "sparc",
 ]);
 
 /** Ghidra candidate backed by an isolated ephemeral headless import. */
