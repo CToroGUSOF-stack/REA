@@ -375,7 +375,7 @@ export class WabtArtifactProvider implements WasmArtifactPort {
         "Imports and exports retain exact top-level WABT WAT forms. Names remain escaped producer text; unescaped objdump display names are not parsed as unambiguous identifiers.",
         "JavaScript references are AST-observed static literals only. Candidate matches are associations, not proven data flow, URL-to-file identity or runtime loading. Computed references and aliases are not resolved.",
         "No target execution or implicit fetch. WABT tools are trusted caller-supplied executables; SHA-256 identifies their bytes, not publisher authenticity. No OS memory sandbox is claimed.",
-        "Each subprocess has a 30-second deadline and 32 MiB combined output budget. Oversized output fails instead of producing truncated success.",
+        `Each subprocess has a ${String(WABT_LIMITS.timeoutMs / 1000)}-second deadline and ${String(WABT_LIMITS.outputBytes / (1024 * 1024))} MiB combined output budget. Oversized output fails instead of producing truncated success.`,
       ];
       const report = wasmArtifactSchema.parse({
         artifact,

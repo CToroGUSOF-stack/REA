@@ -202,6 +202,13 @@ const assertModeOutcome = (
           artifact: { path, bytes: 76 },
           validation: "valid",
           runtime_execution: "not-performed",
+          tool_profile: {
+            timeout_ms: 30_000,
+            output_budget_bytes: 128 * 1024 * 1024,
+          },
+          limitations: expect.arrayContaining([
+            "Each subprocess has a 30-second deadline and 128 MiB combined output budget. Oversized output fails instead of producing truncated success.",
+          ]),
         },
       },
     });
