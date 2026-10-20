@@ -506,6 +506,7 @@ hosted connector; see [its configuration](client-configuration.md#other-client-s
 | Factory Droid      | `droid`          |
 | Trae               | `trae`           |
 | WorkBuddy          | `workbuddy`      |
+| MiniMax Code       | `minimax_code`   |
 | ZCode              | `zcode`          |
 | DeepSeek Harness   | `dsh`            |
 
