@@ -50,6 +50,8 @@ const SOURCE_PATHS = {
   gdbContracts: "dist/contracts/gdbToolContracts.js",
   gdbProvider: "dist/gdb/GdbSessionManager.js",
   rizinDebugContracts: "dist/contracts/rizinDebugToolContracts.js",
+  x64dbgContracts: "dist/contracts/x64dbgToolContracts.js",
+  x64dbgProvider: "dist/x64dbg/X64dbgDiscovery.js",
   objdumpProvider: "dist/objdump/ObjdumpCommand.js",
   rizinProvider: "dist/rizin/RizinCommand.js",
   rizinDebugProvider: "dist/rizin/RizinDebugSessionManager.js",

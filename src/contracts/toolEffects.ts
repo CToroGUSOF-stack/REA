@@ -54,6 +54,7 @@ const sessionEvidence = effects({ mutatesSession: true });
 /** Explicit effect audit for every public tool. */
 export const TOOL_EFFECTS: Readonly<Record<string, ToolEffects>> = {
   list_cutter_sessions: effects({ accessesNetwork: true }),
+  discover_x64dbg: effects(),
   cutter_command: effects({
     mutatesTarget: true,
     executesForeignCode: true,

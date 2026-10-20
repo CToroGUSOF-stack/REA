@@ -51,6 +51,7 @@ export const CLI_COMMANDS = Object.freeze({
   inspectBinaryLayout: "inspect-binary-layout",
   listCutterSessions: "list-cutter-sessions",
   cutterCommand: "cutter-command",
+  discoverX64dbg: "discover-x64dbg",
   inspectWithObjdump: "inspect-with-objdump",
   listObjdumpArchitectures: "list-objdump-architectures",
   executeRizinCommand: "execute-rizin-command",

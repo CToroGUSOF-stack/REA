@@ -24,6 +24,7 @@ export const toolFamilyCatalog = (sources) => {
           .REVERSE_ENGINEERING_TOOL_CONTRACTS,
         ...sources.gdbContracts.GDB_TOOL_CONTRACTS,
         ...sources.rizinDebugContracts.RIZIN_DEBUG_TOOL_CONTRACTS,
+        ...sources.x64dbgContracts.X64DBG_TOOL_CONTRACTS,
       ],
     },
     {
@@ -197,6 +198,10 @@ export const providerCatalog = (sources) => {
     {
       identity: sources.rizinDebugProvider.RIZIN_DEBUGGER_PROVIDER_IDENTITY,
       contracts: sources.rizinDebugContracts.RIZIN_DEBUG_TOOL_CONTRACTS,
+    },
+    {
+      identity: sources.x64dbgProvider.X64DBG_PROVIDER_IDENTITY,
+      contracts: sources.x64dbgContracts.X64DBG_TOOL_CONTRACTS,
     },
     {
       identity: sources.fridaProvider.FRIDA_PROVIDER_IDENTITY,
