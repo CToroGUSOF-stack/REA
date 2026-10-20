@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { lstat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { win32 } from "node:path";
+import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
@@ -21,6 +22,45 @@ const readySchema = z.strictObject({
   fileId: z.string().regex(/^[a-f0-9]{32}$/u),
   privateDacl: z.literal(true),
 });
+
+/** Parse the guardian's one-line UTF-8 readiness frame without depending on pipe chunk boundaries. */
+export const readGuardianReadyLine = (stdout: Readable): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const frame = Buffer.alloc(4096);
+    let length = 0;
+    const onError = (cause: Error): void => {
+      stdout.off("data", onData);
+      reject(cause);
+    };
+    const onData = (chunk: Buffer): void => {
+      const newline = chunk.indexOf(10);
+      const fragmentLength = newline === -1 ? chunk.length : newline;
+      const nextLength = length + fragmentLength;
+      if (nextLength + (newline === -1 ? 0 : 1) > frame.length) {
+        stdout.off("data", onData);
+        reject(
+          new Error("Android workspace guardian readiness exceeded 4 KiB"),
+        );
+        return;
+      }
+      chunk.copy(frame, length, 0, fragmentLength);
+      length = nextLength;
+      if (newline === -1) return;
+      stdout.off("data", onData);
+      try {
+        resolve(
+          new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+            frame.subarray(0, length),
+          ),
+        );
+      } catch (cause) {
+        reject(cause);
+      }
+    };
+    stdout.on("data", onData);
+    // Retain an error listener after readiness, as the child pipe can fail later.
+    stdout.once("error", onError);
+  });
 
 /** The Android provider needs a path and a cleanup owner, regardless of host. */
 export interface JadxWorkspaceRoot {
@@ -114,21 +154,7 @@ class WindowsJadxWorkspaceRoot implements JadxWorkspaceRoot {
       );
       child.once("close", (code, signal) => resolve({ code, signal }));
     });
-    const ready = new Promise<string>((resolve, reject) => {
-      let frame = "";
-      child.stdout.on("data", (chunk: Buffer) => {
-        frame += chunk.toString();
-        if (frame.length > 4096) {
-          reject(
-            new Error("Android workspace guardian readiness exceeded 4 KiB"),
-          );
-          return;
-        }
-        const end = frame.indexOf("\n");
-        if (end !== -1) resolve(frame.slice(0, end));
-      });
-      child.stdout.once("error", reject);
-    });
+    const ready = readGuardianReadyLine(child.stdout);
     try {
       const line = await boundedWait(
         Promise.race([
