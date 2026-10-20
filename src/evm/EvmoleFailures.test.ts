@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import { evmInterfaceFailure } from "./EvmoleFailures.js";
 import { OwnedCommandFailure } from "../process/OwnedCommand.js";
 import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
+import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
 import type { ProviderProcessSnapshot } from "../process/ProviderProcess.js";
 
 const snapshot: ProviderProcessSnapshot = {
@@ -68,4 +69,46 @@ it.each([
     expect(result.cleanupIncomplete).toBe(true);
     expect(result.cleanupResources).toEqual(["exact-owner"]);
   }
+});
+
+it.each([
+  undefined,
+  null,
+  "caller stopped",
+  { requested: "stop" },
+  new AnalysisCancelledError("foreign", {
+    cleanup: { reason: "foreign owner", resources: ["foreign-resource"] },
+  }),
+])(
+  "retains the exact artifact cancellation reason as opaque data: %j",
+  (reason) => {
+    const source = new ArtifactReaderFailure("cancelled", "read cancelled", {
+      cause: reason,
+    });
+    const result = evmInterfaceFailure(
+      source,
+      "artifact-read",
+      "/selected.hex",
+    );
+    expect(result).toBeInstanceOf(AnalysisCancelledError);
+    expect(result.cause).toBe(reason);
+    expect(result.cleanupIncomplete).toBe(false);
+  },
+);
+
+it("preserves the artifact cancellation reason through cleanup wrapping", () => {
+  const reason = { requested: "stop" };
+  const cleanup = {
+    reason: "descriptor close refused",
+    resources: ["/selected.hex"],
+  };
+  const source = ArtifactReaderFailure.withCleanup(
+    new ArtifactReaderFailure("cancelled", "read cancelled", { cause: reason }),
+    cleanup,
+  );
+  const result = evmInterfaceFailure(source, "artifact-read", "/selected.hex");
+  expect(result).toBeInstanceOf(AnalysisCancelledError);
+  expect(result.cause).toBe(reason);
+  expect(result.cleanupIncomplete).toBe(true);
+  expect(result.cleanupResources).toEqual(cleanup.resources);
 });
