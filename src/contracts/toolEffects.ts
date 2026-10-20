@@ -129,6 +129,7 @@ export const TOOL_EFFECTS: Readonly<Record<string, ToolEffects>> = {
   inspect_go_binary: evidence,
   inspect_il2cpp_metadata: evidence,
   inspect_rust_binary: evidence,
+  inspect_unreal_pak: evidence,
   inspect_sqlite_database: effects({
     mutatesSession: true,
     writesFilesystem: true,

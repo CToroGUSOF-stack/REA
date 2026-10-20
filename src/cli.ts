@@ -9,6 +9,7 @@ import { registerDesktopApplicationCommands } from "./cli/desktopApplicationComm
 import { registerGoCommands } from "./cli/goCommands.js";
 import { registerIl2cppCommands } from "./cli/il2cppCommands.js";
 import { registerRustCommands } from "./cli/rustCommands.js";
+import { registerUnrealCommands } from "./cli/unrealCommands.js";
 import { registerSqliteCommands } from "./cli/sqliteCommands.js";
 import { registerAnalysisViewCommands } from "./cli/analysisViewCommands.js";
 import { registerBinaryDiagnosticsCommands } from "./cli/binaryDiagnosticsCommands.js";
@@ -123,6 +124,7 @@ export const createCli = (
   registerGoCommands(cli, logger);
   registerIl2cppCommands(cli, logger);
   registerRustCommands(cli, logger);
+  registerUnrealCommands(cli, logger);
   registerSqliteCommands(cli, logger, environment);
   registerArtifactCommands(cli, logger, analysis.runProviderAnalysis);
   registerManagedCommands(cli, logger, analysis.runProviderAnalysis);

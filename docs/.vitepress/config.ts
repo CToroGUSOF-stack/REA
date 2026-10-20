@@ -31,6 +31,7 @@ export default defineConfig({
           { text: "Go build metadata", link: "/go-binaries" },
           { text: "IL2CPP metadata", link: "/il2cpp-metadata" },
           { text: "Rust dependencies", link: "/rust-binaries" },
+          { text: "Unreal pak indexes", link: "/unreal-pak" },
           {
             text: "JavaScript and Electron",
             link: "/javascript-artifact-reconstruction",

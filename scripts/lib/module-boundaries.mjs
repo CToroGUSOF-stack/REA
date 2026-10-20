@@ -10,6 +10,7 @@ const MIGRATED_PROVIDER_ROOTS = new Set([
   "go",
   "il2cpp",
   "rust",
+  "unreal",
   "wasm",
   "captures",
   "signals",
