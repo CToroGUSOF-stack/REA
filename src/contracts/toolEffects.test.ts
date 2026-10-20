@@ -215,3 +215,9 @@ describe("tool effects", () => {
       );
   });
 });
+
+describe("temporary filesystem work", () => {
+  it("declares the private snapshot that signature inspection writes", () => {
+    expect(TOOL_EFFECTS.inspect_signature?.writesFilesystem).toBe(true);
+  });
+});
