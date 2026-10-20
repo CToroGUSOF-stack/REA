@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { digestSchema } from "../digests.js";
+import { jsonValueSchema } from "../jsonValue.js";
 
 const tokenSchema = z.string().regex(/^0x[0-9a-f]{8}$/u);
 const offsetSchema = z.number().int().min(0);
@@ -65,6 +66,29 @@ const managedResourceSchema = z.object({
   row_offset: offsetSchema,
 });
 
+const customAttributeArgumentSchema = z.object({
+  type: z.string(),
+  value: jsonValueSchema,
+  blob_offset: offsetSchema.nullable(),
+  status: z.enum(["decoded", "unknown"]),
+  reason: z.string().nullable(),
+  enum_underlying_type: z
+    .object({ value: z.string(), kind: z.literal("derived") })
+    .nullable(),
+});
+
+const customAttributeArgumentsSchema = z.object({
+  status: z.enum(["decoded", "partial", "unsupported", "malformed"]),
+  reason: z.string().nullable(),
+  fixed: z.array(customAttributeArgumentSchema),
+  named: z.array(
+    customAttributeArgumentSchema.extend({
+      kind: z.enum(["field", "property"]),
+      name: z.string(),
+    }),
+  ),
+});
+
 const customAttributeSchema = z.object({
   parent_token: tokenSchema,
   constructor_token: tokenSchema.nullable(),
@@ -72,6 +96,7 @@ const customAttributeSchema = z.object({
   value_length: z.number().int().min(0),
   value_sha256: digestSchema,
   decoded_fixed_string: z.string().nullable(),
+  arguments: customAttributeArgumentsSchema.nullable().default(null),
   token: tokenSchema,
   row_offset: offsetSchema,
 });

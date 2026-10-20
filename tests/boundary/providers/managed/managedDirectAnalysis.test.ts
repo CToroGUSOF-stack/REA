@@ -7,7 +7,10 @@ import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js
 
 import { createDirectAnalysis } from "../../../../src/composition/directAnalysis.js";
 import { parseEvidence } from "../../../../src/domain/evidence.js";
-import { buildManagedPeFixture } from "../../../../src/dotnet/ManagedPe.fixture.js";
+import {
+  buildManagedMemberPointerFixture,
+  buildManagedPeFixture,
+} from "../../../../src/dotnet/ManagedPe.fixture.js";
 
 const { runProviderAnalysis } = createDirectAnalysis({});
 
@@ -55,5 +58,29 @@ describe("managed direct-analysis path boundary", () => {
         pinvoke_imports: [],
       },
     });
+  });
+});
+
+it("carries decoded attribute arguments and blob identity in authenticated Evidence", async () => {
+  const directory = await createTestTempDirectory("rea-managed-arguments-");
+  const path = join(directory, "attribute.dll");
+  await writeFile(path, buildManagedMemberPointerFixture());
+  const evidence = parseEvidence(
+    await runProviderAnalysis(path, "inspect_managed_artifact", {}),
+  );
+  expect(evidence).toMatchObject({
+    operation: "inspect_managed_artifact",
+    subject: { local_path: path },
+    normalized_result: {
+      attributes: [
+        {
+          value_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          arguments: {
+            status: "decoded",
+            fixed: [{ type: "string", value: "fixture" }],
+          },
+        },
+      ],
+    },
   });
 });

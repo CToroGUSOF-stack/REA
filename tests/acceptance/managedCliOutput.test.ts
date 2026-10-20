@@ -3,7 +3,10 @@ import { join } from "node:path";
 
 import { expect } from "vitest";
 
-import { buildManagedPeFixture } from "../../src/dotnet/ManagedPe.fixture.js";
+import {
+  buildManagedMemberPointerFixture,
+  buildManagedPeFixture,
+} from "../../src/dotnet/ManagedPe.fixture.js";
 import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
 import { cliTest } from "../support/cli/cliFixture.js";
 
@@ -338,5 +341,117 @@ cliTest(
         },
       });
     }
+  },
+);
+
+cliTest(
+  "managed CLI exposes constructor-decoded custom attribute arguments",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-managed-arguments-cli-");
+    const path = join(root, "attribute.dll");
+    await writeFile(
+      path,
+      buildManagedMemberPointerFixture({ attributeMemberRef: true }),
+    );
+    const result = await cli.run({
+      arguments: ["inspect-managed-artifact", path, "--json"],
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.json).toMatchObject({
+      normalized_result: {
+        attributes: [
+          {
+            constructor_token: "0x0a000001",
+            arguments: {
+              status: "decoded",
+              fixed: [{ type: "string", value: "fixture", blob_offset: 2 }],
+            },
+          },
+        ],
+      },
+    });
+  },
+);
+
+cliTest(
+  "managed CLI preserves nested enum identity and unsupported argument starts",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-attribute-enum-review-");
+    const path = join(root, "attributes.dll");
+    const name = Buffer.from("Fixture.Outer+Mode");
+    await writeFile(
+      path,
+      buildManagedMemberPointerFixture({
+        fieldPointers: null,
+        methodPointers: null,
+        typeReferenceName: "Enum",
+        constructorSignature: Buffer.from([0x20, 0, 1]),
+        types: [
+          { name: "Mode", enumUnderlyingType: 5, enclosingRow: 3 },
+          { name: "Outer" },
+          { name: "Mode", enumUnderlyingType: 8 },
+        ],
+        attributeValue: Buffer.concat([
+          Buffer.from([1, 0, 1, 0, 0x54, 0x55, name.length]),
+          name,
+          Buffer.from([4]),
+          Buffer.from("Mode"),
+          Buffer.from([42]),
+        ]),
+      }),
+    );
+    const nested = await cli.run({
+      arguments: ["inspect-managed-artifact", path, "--json"],
+    });
+    expect(nested.exitCode).toBe(0);
+    expect(nested.json).toMatchObject({
+      normalized_result: {
+        attributes: [
+          {
+            arguments: {
+              status: "decoded",
+              named: [
+                {
+                  name: "Mode",
+                  type: name.toString(),
+                  value: 42,
+                  enum_underlying_type: { value: "uint8", kind: "derived" },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+    await writeFile(
+      path,
+      buildManagedMemberPointerFixture({
+        constructorSignature: Buffer.from([0x20, 1, 1, 0x1d, 0x11, 5]),
+        attributeValue: Buffer.from([1, 0, 1, 0, 0, 0, 42, 0, 0]),
+      }),
+    );
+    const external = await cli.run({
+      arguments: ["inspect-managed-artifact", path, "--json"],
+    });
+    expect(external.exitCode).toBe(0);
+    expect(external.json).toMatchObject({
+      normalized_result: {
+        attributes: [
+          {
+            arguments: {
+              status: "unsupported",
+              fixed: [
+                {
+                  type: "System.Attribute[]",
+                  blob_offset: 2,
+                  status: "unknown",
+                  value: null,
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
   },
 );

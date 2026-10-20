@@ -625,3 +625,32 @@ MethodDef flags or implementation flags value differs, including accessibility
 or synchronization changes. This is separate from the CIL/signature matching
 tiers: identical instructions do not establish unchanged method metadata. The
 reported difference is static metadata evidence, not proof of runtime behavior.
+
+### Custom attribute arguments
+
+`inspect_managed_artifact` decodes custom attribute values from the constructor's
+MethodDef or MemberRef signature, without loading the CLR, running constructors,
+or opening referenced assemblies. `arguments.fixed` and `arguments.named` retain
+value types and offsets relative to the value blob; named entries distinguish
+fields and properties. Null strings and arrays stay null, empty strings and
+arrays stay empty, and 64-bit integers use decimal strings. Boxed values retain
+the serialized type and value; `System.Type` names stay verbatim. Non-finite
+floating-point values use `NaN`, `Infinity`, or `-Infinity` strings.
+
+`arguments.status` distinguishes decoded, partial, unsupported, and malformed
+values. A null `arguments` means the constructor and blob were completely
+examined and contain no fixed or named arguments. Raw value length and SHA-256
+remain present even when decoding cannot finish. Unknown fixed values have
+`status: "unknown"` and a reason; offsets after an unknown-width argument are
+null rather than guessed. Known facts preceding an error remain available.
+
+Local enum names include their enclosing types (`Outer+Mode`), with ambiguous or externally assembly-qualified names left unresolved. Enum name and owned-field indexes are shared within one inspection, and field signature parsing shares its resource budget. When a value cannot be decoded, the argument retains its original blob offset and known type; named entries also retain their name and field/property kind.
+
+A local enum's `enum_underlying_type` records the primitive width and
+`kind: "derived"`, obtained from its owned `value__` field.
+External enum widths are unknown: decoding stops instead of assuming Int32 or
+reading another assembly. Decoded strings and collections share the inspection's
+metadata representation budget; impossible array counts are rejected before
+allocation. The existing `decoded_fixed_string` compatibility field remains for
+TargetFrameworkAttribute and is derived from the same decoded arguments.
+`target_frameworks` consumes the structured result.

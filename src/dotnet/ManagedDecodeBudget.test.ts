@@ -92,3 +92,19 @@ describe("managed decoding bounds", () => {
     expect(() => budget.admitTransient(bound, null)).not.toThrow();
   });
 });
+
+it("releases only a nested parser's reservation on success or failure", () => {
+  const budget = new ManagedDecodeBudget();
+  budget.admitTransient(40 * 1024 * 1024, null);
+  expect(budget.withTransient(8 * 1024 * 1024, null, () => 42)).toBe(42);
+  expect(() =>
+    budget.withTransient(8 * 1024 * 1024, null, () => {
+      throw new Error("parser failure");
+    }),
+  ).toThrow("parser failure");
+  expect(() => budget.reserve(25 * 1024 * 1024, null)).toThrow(
+    ManagedReaderFailure,
+  );
+  budget.releaseTransient();
+  expect(() => budget.reserve(64 * 1024 * 1024, null)).not.toThrow();
+});

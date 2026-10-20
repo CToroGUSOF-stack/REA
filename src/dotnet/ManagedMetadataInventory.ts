@@ -175,9 +175,11 @@ const readAttributes = (
       attribute.parent_token === metadataToken(32, 1) &&
       attribute.type_name ===
         "System.Runtime.Versioning.TargetFrameworkAttribute" &&
-      attribute.decoded_fixed_string !== null
+      attribute.arguments?.fixed[0]?.status === "decoded" &&
+      attribute.arguments.fixed[0].type === "string" &&
+      typeof attribute.arguments.fixed[0].value === "string"
     )
-      targetFrameworks.add(attribute.decoded_fixed_string);
+      targetFrameworks.add(attribute.arguments.fixed[0].value);
   }
   return { attributes, targetFrameworks: [...targetFrameworks].sort() };
 };

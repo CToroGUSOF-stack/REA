@@ -19,7 +19,10 @@ import { MANAGED_NATIVE_VERIFICATION_EXAMPLE } from "../../../src/contracts/mana
 import { toolContract } from "../../../src/contracts/toolContracts.js";
 import { ManagedStaticProvider } from "../../../src/dotnet/ManagedStaticProvider.js";
 import { createServer } from "../../../src/server/createServer.js";
-import { buildManagedPeFixture } from "../../../src/dotnet/ManagedPe.fixture.js";
+import {
+  buildManagedMemberPointerFixture,
+  buildManagedPeFixture,
+} from "../../../src/dotnet/ManagedPe.fixture.js";
 
 type ManagedOutputAssertion = Awaited<ReturnType<typeof createOutputAssertion>>;
 
@@ -144,6 +147,26 @@ it("runs every managed static inspection independently of an active native targe
           },
         ],
         coverage: { state: "partial" },
+      },
+    });
+    const attributePath = join(directory, "custom-attribute.dll");
+    await writeFile(attributePath, buildManagedMemberPointerFixture());
+    const decodedAttribute = structured(
+      await client.callTool({
+        name: "inspect_managed_artifact",
+        arguments: { path: attributePath },
+      }),
+    );
+    expect(decodedAttribute).toMatchObject({
+      normalized_result: {
+        attributes: [
+          {
+            arguments: {
+              status: "decoded",
+              fixed: [{ type: "string", value: "fixture" }],
+            },
+          },
+        ],
       },
     });
   } finally {

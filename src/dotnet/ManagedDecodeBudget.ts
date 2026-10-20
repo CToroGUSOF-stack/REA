@@ -45,6 +45,20 @@ export class ManagedDecodeBudget {
     this.#transient += bytes;
   }
 
+  /** Admit a nested parser without releasing allocations still owned by its caller. */
+  withTransient<Value>(
+    bytes: number,
+    offset: number | null,
+    read: () => Value,
+  ): Value {
+    this.admitTransient(bytes, offset);
+    try {
+      return read();
+    } finally {
+      this.#transient -= bytes;
+    }
+  }
+
   /** End the current item's decoding; its bookkeeping is unreachable and only reserved output remains. */
   releaseTransient(): void {
     this.#transient = 0;

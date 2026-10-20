@@ -1203,13 +1203,52 @@ export const buildManagedPeFixture = (
     buildManagedFixtureMetadata(options, methodRva),
   );
 
+interface MemberPointerType {
+  readonly name: string;
+  readonly namespace?: string;
+  readonly enumUnderlyingType?: number;
+  readonly fieldSignature?: Buffer;
+  readonly enclosingRow?: number;
+}
+interface MemberPointerFixtureOptions {
+  readonly fieldPointers?: readonly number[] | null;
+  readonly methodPointers?: readonly number[] | null;
+  readonly streamName?: "#~" | "#-";
+  readonly attributeValue?: Buffer;
+  readonly constructorSignature?: Buffer;
+  readonly attributeMemberRef?: boolean;
+  readonly typeReferenceName?: string;
+  readonly enumUnderlyingType?: number;
+  readonly types?: readonly MemberPointerType[];
+}
+const memberPointerTypeRows = (
+  types: readonly MemberPointerType[],
+  typeNames: readonly number[],
+  namespaces: readonly number[],
+): readonly Buffer[] =>
+  typeNames.map((name, index) =>
+    typeDefRow({
+      name,
+      namespace: index === 0 ? 0 : (namespaces[index - 1] ?? 0),
+      fieldList: Math.max(1, index),
+      methodList: Math.max(1, Math.min(3, index)),
+      stringSize: 2,
+      typeDefOrRefSize: 2,
+      fieldListSize: 2,
+      methodListSize: 2,
+      extendsRaw: index === 0 ? 0 : (1 << 2) | 1,
+      flags:
+        index === 0
+          ? 0
+          : types[index - 1]?.enclosingRow === undefined
+            ? 0x0010_0001
+            : 0x0010_0002,
+    }),
+  );
+
 /** Two attribute classes whose pointer-table slots can reorder physical members. */
 export const buildManagedMemberPointerFixture = (
-  options: {
-    readonly fieldPointers?: readonly number[] | null;
-    readonly methodPointers?: readonly number[] | null;
-    readonly streamName?: "#~" | "#-";
-  } = {},
+  options: MemberPointerFixtureOptions = {},
 ): Buffer => {
   const fieldPointers =
     options.fieldPointers === undefined ? [2, 1] : options.fieldPointers;
@@ -1222,21 +1261,50 @@ export const buildManagedMemberPointerFixture = (
     const blobs = new BlobHeap();
     const moduleName = strings.add("MemberPointers.dll");
     const assemblyName = strings.add("Fixture.MemberPointers");
-    const namespace = strings.add("Fixture");
-    const typeNames = ["<Module>", "A", "B"].map((name) => strings.add(name));
-    const fieldNames = ["firstField", "secondField"].map((name) =>
-      strings.add(name),
+    const types: readonly MemberPointerType[] = options.types ?? [
+      { name: "A" },
+      {
+        name: "B",
+        ...(options.enumUnderlyingType === undefined
+          ? {}
+          : { enumUnderlyingType: options.enumUnderlyingType }),
+      },
+    ];
+    const typeNames = ["<Module>", ...types.map((type) => type.name)].map(
+      (name) => strings.add(name),
+    );
+    const namespaces = types.map((type) =>
+      strings.add(type.namespace ?? "Fixture"),
+    );
+    const fieldNames = types.map((type, index) =>
+      strings.add(
+        type.enumUnderlyingType === undefined
+          ? index === 0
+            ? "firstField"
+            : "secondField"
+          : "value__",
+      ),
     );
     const constructorName = strings.add(".ctor");
-    const attributeName = strings.add("Attribute");
+    const attributeName = strings.add(
+      options.typeReferenceName ??
+        (options.enumUnderlyingType === undefined ? "Attribute" : "Enum"),
+    );
     const systemNamespace = strings.add("System");
     const runtimeName = strings.add("System.Runtime");
-    const fieldSignature = blobs.add(Buffer.from([0x06, 0x08]));
+    const fieldSignatures = types.map((type) =>
+      blobs.add(
+        type.fieldSignature ??
+          Buffer.from([0x06, type.enumUnderlyingType ?? 0x08]),
+      ),
+    );
     const constructorSignature = blobs.add(
-      Buffer.from([0x20, 0x01, 0x01, 0x0e]),
+      options.constructorSignature ?? Buffer.from([0x20, 0x01, 0x01, 0x0e]),
     );
     const baseConstructorSignature = blobs.add(Buffer.from([0x20, 0, 0x01]));
-    const attributeValue = blobs.add(fixedStringAttributeBlob("fixture"));
+    const attributeValue = blobs.add(
+      options.attributeValue ?? fixedStringAttributeBlob("fixture"),
+    );
     const rows = new Map<number, readonly Buffer[]>([
       [0, [moduleRow(moduleName, 2, 2)]],
       // ResolutionScope selects AssemblyRef 1, which contains System.Attribute.
@@ -1250,24 +1318,13 @@ export const buildManagedMemberPointerFixture = (
           ]),
         ],
       ],
+      [2, memberPointerTypeRows(types, typeNames, namespaces)],
       [
-        2,
-        typeNames.map((name, index) =>
-          typeDefRow({
-            name,
-            namespace: index === 0 ? 0 : namespace,
-            fieldList: index === 2 ? 2 : 1,
-            methodList: index === 2 ? 2 : 1,
-            stringSize: 2,
-            typeDefOrRefSize: 2,
-            fieldListSize: 2,
-            methodListSize: 2,
-            extendsRaw: index === 0 ? 0 : (1 << 2) | 1,
-            flags: index === 0 ? 0 : 0x0010_0001,
-          }),
+        4,
+        fieldNames.map((name, index) =>
+          fieldRow(name, fieldSignatures[index] ?? 0, 2, 2),
         ),
       ],
-      [4, fieldNames.map((name) => fieldRow(name, fieldSignature, 2, 2))],
       [
         6,
         [1, 2].map(() =>
@@ -1288,7 +1345,9 @@ export const buildManagedMemberPointerFixture = (
         [
           memberRefRow({
             name: constructorName,
-            signature: baseConstructorSignature,
+            signature: options.attributeMemberRef
+              ? constructorSignature
+              : baseConstructorSignature,
             stringSize: 2,
             blobSize: 2,
             parentSize: 2,
@@ -1301,7 +1360,10 @@ export const buildManagedMemberPointerFixture = (
         [
           customAttributeRow({
             value: attributeValue,
-            options: { customAttributeTypeRaw: (1 << 3) | 2 },
+            options: {
+              customAttributeTypeRaw:
+                (1 << 3) | (options.attributeMemberRef ? 3 : 2),
+            },
             parentIndexSize: 2,
             typeIndexSize: 2,
             blobSize: 2,
@@ -1312,6 +1374,12 @@ export const buildManagedMemberPointerFixture = (
       [32, [assemblyRow(assemblyName, 2, 2)]],
       [35, [assemblyRefRow(runtimeName, 0, false, 2, 2)]],
     ]);
+    const nested = types.flatMap((type, index) =>
+      type.enclosingRow === undefined
+        ? []
+        : [Buffer.concat([u16(index + 2), u16(type.enclosingRow)])],
+    );
+    if (nested.length > 0) rows.set(41, nested);
     if (fieldPointers !== null) rows.set(3, fieldPointers.map(u16));
     if (methodPointers !== null) rows.set(5, methodPointers.map(u16));
     return metadataRoot(

@@ -1,3 +1,4 @@
+import { decodeCustomAttributeArguments } from "./ManagedCustomAttributeArguments.js";
 import { managedDecodeBudget } from "./ManagedDecodeBudget.js";
 import { memberDeclaringTypeRowLookup } from "./ManagedMemberOwnership.js";
 import type { TypeMemberListFacts } from "./ManagedTypeMemberLists.js";
@@ -328,57 +329,6 @@ const attributeTypeName = (
   return null;
 };
 
-const decodeCompressedLength = (
-  blob: Buffer,
-  offset: number,
-): { readonly length: number; readonly prefix: number } | undefined => {
-  const first = blob[offset];
-  if (first === undefined) return undefined;
-  if ((first & 0x80) === 0) return { length: first, prefix: 1 };
-  if ((first & 0xc0) === 0x80 && blob[offset + 1] !== undefined)
-    return {
-      length: ((first & 0x3f) << 8) | (blob[offset + 1] ?? 0),
-      prefix: 2,
-    };
-  if (
-    (first & 0xe0) === 0xc0 &&
-    blob[offset + 1] !== undefined &&
-    blob[offset + 2] !== undefined &&
-    blob[offset + 3] !== undefined
-  )
-    return {
-      length:
-        (first & 0x1f) * 0x01_00_00_00 +
-        (blob[offset + 1] ?? 0) * 0x01_00_00 +
-        (blob[offset + 2] ?? 0) * 0x0100 +
-        (blob[offset + 3] ?? 0),
-      prefix: 4,
-    };
-  return undefined;
-};
-
-const decodeFixedString = (
-  blob: Buffer,
-  layout: ManagedMetadataLayout,
-): string | null => {
-  if (blob.length < 3 || blob.readUInt16LE(0) !== 1 || blob[2] === 0xff)
-    return null;
-  const length = decodeCompressedLength(blob, 2);
-  if (length === undefined) return null;
-  const start = 2 + length.prefix;
-  if (start > blob.length - length.length) return null;
-  managedDecodeBudget(layout).reserveString(length.length, layout.blob.offset);
-  try {
-    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
-      blob.subarray(start, start + length.length),
-    );
-  } catch (cause: unknown) {
-    // Invalid UTF-8 blobs decode as null.
-    void cause;
-    return null;
-  }
-};
-
 export const readCustomAttribute = (
   bytes: Buffer,
   layout: ManagedMetadataLayout,
@@ -452,6 +402,14 @@ export const readCustomAttribute = (
           attributeTypeName(bytes, layout, typeRaw, heapExtent, memberLists),
         issues,
       ) ?? null;
+  const argumentsResult = decodeCustomAttributeArguments(
+    bytes,
+    layout,
+    value,
+    constructor,
+    memberLists,
+  );
+  const first = argumentsResult.fixed[0];
   return {
     parent_token: parent,
     constructor_token: constructor,
@@ -459,9 +417,18 @@ export const readCustomAttribute = (
     value_length: value.length,
     value_sha256: managedDecodeBudget(layout).digest(value, "sha256"),
     decoded_fixed_string:
-      typeName === "System.Runtime.Versioning.TargetFrameworkAttribute"
-        ? decodeFixedString(value, layout)
+      typeName === "System.Runtime.Versioning.TargetFrameworkAttribute" &&
+      first?.status === "decoded" &&
+      first.type === "string" &&
+      typeof first.value === "string"
+        ? first.value
         : null,
+    arguments:
+      argumentsResult.status === "decoded" &&
+      argumentsResult.fixed.length === 0 &&
+      argumentsResult.named.length === 0
+        ? null
+        : argumentsResult,
     token: metadataToken(12, row),
     row_offset: cursor.start,
   };
