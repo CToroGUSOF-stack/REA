@@ -699,3 +699,20 @@ it("retains the identity of a directory removed by a terminal parent segment", a
     readElectronFuseImage(located.file.path, { selection: located.file }),
   ).rejects.toBeInstanceOf(RegularFileChangedError);
 });
+
+describe("Electron fuse PE with an overlapped DOS header", () => {
+  it("reads a signature-confirmed PE whose header starts at offset 4", async () => {
+    const root = await createTestTempDirectory("rea-electron-overlapped-pe-");
+    const image = peFuseImage(OBSIDIAN_FUSE_BYTES);
+    const overlapped = Buffer.from(image.bytes);
+    overlapped.write("PE\0\0", 4, "binary");
+    overlapped.writeUInt32LE(4, 0x3c);
+    await writeFile(join(root, "app.exe"), overlapped);
+
+    const report = await inspect(join(root, "app.exe"));
+    expect(report.artifact.format).toBe("pe");
+    expect(report.slices[0]?.sentinels[0]?.sentinel_offset).toBe(
+      image.sentinelOffset,
+    );
+  });
+});

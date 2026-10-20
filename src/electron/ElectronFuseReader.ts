@@ -3,6 +3,7 @@ import { decodePeMachine } from "../domain/peMachine.js";
 import type { ResolvedElectronFuseFile } from "./ElectronFusePath.js";
 import { createHash } from "node:crypto";
 import { lstat, type FileHandle } from "node:fs/promises";
+import { minimumWindowsHeaderOffset } from "../domain/dosMz.js";
 
 import {
   hasMachoMagic,
@@ -484,7 +485,7 @@ const identifyPe = async (
   ).readUInt32LE(0x3c);
   if (
     !Number.isSafeInteger(offset) ||
-    offset < 64 ||
+    offset < minimumWindowsHeaderOffset("PE") ||
     offset > ELECTRON_FUSE_LIMITS.maximumPeHeaderOffset ||
     offset > size - 4
   )

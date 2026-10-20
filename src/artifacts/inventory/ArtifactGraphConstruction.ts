@@ -26,7 +26,9 @@ import {
   zipPackageFormatForPath,
   type ZipPackageFormat,
 } from "../../domain/zipPackageFormat.js";
+
 import {
+  minimumWindowsHeaderOffset,
   observeMzWindowsHeader,
   parseDosMzHeader,
 } from "../../domain/dosMz.js";
@@ -577,7 +579,7 @@ export const classifyArtifactBytes = (
       const windowsOffset = windowsHeader.offset;
       if (
         windowsHeader.signature === "PE" &&
-        windowsOffset >= 64 &&
+        windowsOffset >= minimumWindowsHeaderOffset(windowsHeader.signature) &&
         windowsOffset <= prefix.length - 4
       )
         return "pe";

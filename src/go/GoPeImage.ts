@@ -1,4 +1,8 @@
-import { observeMzWindowsHeader, parseDosMzHeader } from "../domain/dosMz.js";
+import {
+  minimumWindowsHeaderOffset,
+  observeMzWindowsHeader,
+  parseDosMzHeader,
+} from "../domain/dosMz.js";
 import {
   declaredFileRange,
   GoBinaryFormatFailure,
@@ -20,7 +24,7 @@ const peHeaderOffset = (reader: GoBinaryReader): number => {
     );
   }
   const { offset: pe } = windowsHeader;
-  if (pe < 64)
+  if (pe < minimumWindowsHeaderOffset(windowsHeader.signature))
     throw new GoBinaryFormatFailure(
       "malformed",
       "PE signature overlaps the DOS header",

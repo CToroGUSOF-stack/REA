@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { NativeMetadataRecovery } from "./nativeMetadataRecovery.js";
+import { minimumWindowsHeaderOffset } from "../dosMz.js";
 
 const RTR_SIGNATURE = 0x00525452;
 const RTR_ROW_SIZE = 24;
@@ -387,10 +388,13 @@ class PeImage {
     if (bytes.length < 0x40 || bytes.toString("latin1", 0, 2) !== "MZ")
       throw new Error("Not a PE image");
     const peOffset = this.#u32(0x3c);
-    if (peOffset < 0x40) throw new Error("PE header overlaps the DOS header");
     this.#range(peOffset, 24);
     if (bytes.toString("latin1", peOffset, peOffset + 4) !== "PE\0\0")
       throw new Error("Invalid PE signature");
+    if (peOffset < minimumWindowsHeaderOffset("PE"))
+      throw new Error("PE header overlaps the DOS header");
+    if (peOffset < minimumWindowsHeaderOffset("PE"))
+      throw new Error("PE header overlaps the DOS header");
     this.#machine = this.#u16(peOffset + 4);
     const count = this.#u16(peOffset + 6);
     // Microsoft documents a 96-section Windows image-loader limit. This
