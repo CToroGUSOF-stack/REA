@@ -8,6 +8,56 @@ import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
 import { cliTest } from "../support/cli/cliFixture.js";
 
 cliTest(
+  "joins repeated managed CIL sites without relying on edge array order",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-managed-site-offsets-");
+    const path = join(root, "repeated-sites.dll");
+    const il = Buffer.from([
+      0x02, 0x7b, 1, 0, 0, 4, 0x28, 1, 0, 0, 10, 0x28, 1, 0, 0, 10, 0x7b, 1, 0,
+      0, 4, 0x2a,
+    ]);
+    await writeFile(
+      path,
+      buildManagedPeFixture({
+        ilBody: Buffer.concat([Buffer.from([(il.length << 2) | 2]), il]),
+      }),
+    );
+    const output = await cli.run({
+      arguments: ["inspect-managed-members", path, "--json"],
+    });
+    expect(output.exitCode, output.stdout + output.stderr).toBe(0);
+    expect(output.json).toMatchObject({
+      normalized_result: {
+        call_edges: [
+          {
+            caller_token: "0x06000001",
+            il_offset: 6,
+            target_token: "0x0a000001",
+          },
+          {
+            caller_token: "0x06000001",
+            il_offset: 11,
+            target_token: "0x0a000001",
+          },
+        ],
+        field_accesses: [
+          {
+            method_token: "0x06000001",
+            il_offset: 1,
+            field_token: "0x04000001",
+          },
+          {
+            method_token: "0x06000001",
+            il_offset: 16,
+            field_token: "0x04000001",
+          },
+        ],
+      },
+    });
+  },
+);
+
+cliTest(
   "managed CLI retains metadata and CIL after repeated local constructor owner lookups",
   async ({ cli }) => {
     const root = await createTestTempDirectory("rea-managed-row-lookup-");
