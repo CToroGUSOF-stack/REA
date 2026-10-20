@@ -1,4 +1,6 @@
 import { digestCanonicalValue } from "./canonicalDigest.js";
+import { canonicalJson } from "./comparisonSemantics.js";
+import { compareUnicodeCodePoints } from "./unicodeCodePointOrder.js";
 
 import {
   BROWSER_SCENARIO_BUILT_IN_NORMALIZATION_RULES,
@@ -56,8 +58,23 @@ export const normalizeScenarioValue = (
           normalized.split(rule.match).join(rule.replacement),
         value,
       );
-  if (Array.isArray(value))
-    return value.map((item) => normalizeScenarioValue(item, artifact, rules));
+  if (Array.isArray(value)) {
+    const normalized = value.map((item) =>
+      normalizeScenarioValue(item, artifact, rules),
+    );
+    // Storage arrays are inventories, not ordered events. Sort complete entries
+    // after literal rules; names alone can collide after redaction/normalization.
+    // Keep multiplicity and every cookie attribute or value fingerprint.
+    return artifact === "storage"
+      ? normalized
+          .map((item) => ({
+            item,
+            key: canonicalJson(item, "Browser scenario"),
+          }))
+          .sort((left, right) => compareUnicodeCodePoints(left.key, right.key))
+          .map(({ item }) => item)
+      : normalized;
+  }
   if (typeof value !== "object" || value === null) return value;
   return Object.fromEntries(
     Object.entries(value).map(([key, item]) => [
