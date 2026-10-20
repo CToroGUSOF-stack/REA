@@ -62,6 +62,15 @@ export const boundProofEvidence = (
     readonly claim_ids: readonly string[];
   },
   authority: "shipped-artifact" | "controlled-replay" = "controlled-replay",
+  options: {
+    readonly passed?: boolean;
+    readonly control?: {
+      readonly defect?: string;
+      readonly verifier_sha256: string;
+      readonly candidate_sha256?: string;
+      readonly failure_kind?: string;
+    };
+  } = {},
 ) =>
   createEvidence(
     undefined,
@@ -71,12 +80,13 @@ export const boundProofEvidence = (
       operation: "verify_reconstruction_obligations",
       parameters: {},
       result: {
-        passed: true,
+        passed: options.passed ?? true,
         obligation_ids: [...result.obligation_ids],
         fixture_ids: [...result.fixture_ids],
         case_kinds: [...result.case_kinds],
         verifier_ids: [...result.verifier_ids],
         claim_ids: [...result.claim_ids],
+        ...options.control,
       },
       confidence: "observed",
       authority,
