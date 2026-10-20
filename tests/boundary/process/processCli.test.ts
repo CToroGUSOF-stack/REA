@@ -121,14 +121,24 @@ describe("process CLI errors", () => {
 });
 
 describe("process CLI environment key diagnostics", () => {
-  it("reports the reserved process environment key constraint", async () => {
+  it.each([
+    [
+      "REA_PROCESS_RUN_ID",
+      "REA_PROCESS_RUN_ID is reserved by the process adapter",
+    ],
+    [
+      "__proto__",
+      "__proto__ cannot reach the captured process because the PTY backend drops it before launch; run /usr/bin/env with __proto__=VALUE before the command instead",
+    ],
+  ])("reports the reserved %s environment key", async (name, message) => {
     const root = await createTestTempDirectory("rea-process-cli-");
     const scenario = join(root, "reserved-environment.json");
     await writeFile(
       scenario,
       JSON.stringify({
         executable: process.execPath,
-        environment: { REA_PROCESS_RUN_ID: "caller-value" },
+        // A computed key stays an own member that JSON.stringify writes.
+        environment: { [name]: "caller-value" },
       }),
     );
 
@@ -140,10 +150,10 @@ describe("process CLI environment key diagnostics", () => {
         operation: "capture_process_scenario",
         issues: [
           {
-            path: ["environment", "REA_PROCESS_RUN_ID"],
+            path: ["environment", name],
             reason: "invalid_format",
             expected: "regex",
-            message: "REA_PROCESS_RUN_ID is reserved by the process adapter",
+            message,
           },
         ],
       },

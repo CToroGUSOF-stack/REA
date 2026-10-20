@@ -26,7 +26,7 @@ afterEach(async () => {
   await Promise.all(resources.splice(0).map((resource) => resource.close()));
 });
 
-it("rejects oversized initial and resize terminal buffers through MCP before launching", async () => {
+it("rejects oversized terminal buffers and reserved environment names through MCP before launching", async () => {
   const root = await createTestTempDirectory("rea-terminal-admission-");
   const marker = join(root, "launched");
   const session = createTestBinarySession(() => {
@@ -42,9 +42,21 @@ it("rejects oversized initial and resize terminal buffers through MCP before lau
     InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);
-  for (const input of [
-    { terminal: { columns: 1_000, rows: 1, scrollback: 1_000 } },
-    { events: [{ type: "resize", at_ms: 10, columns: 1_000, rows: 1 }] },
+  for (const [input, diagnostic] of [
+    [{ terminal: { columns: 1_000, rows: 1, scrollback: 1_000 } }, "1000000"],
+    [
+      { events: [{ type: "resize", at_ms: 10, columns: 1_000, rows: 1 }] },
+      "1000000",
+    ],
+    [
+      { environment: { REA_PROCESS_RUN_ID: "caller-value" } },
+      "environment.REA_PROCESS_RUN_ID: Invalid key in record",
+    ],
+    // A client's JSON request defines __proto__ as an own member.
+    [
+      { environment: JSON.parse('{"__proto__":"caller-value"}') as unknown },
+      "environment.__proto__: Invalid key in record",
+    ],
   ] as const) {
     const result = await client.callTool({
       name: "capture_process_scenario",
@@ -62,11 +74,29 @@ it("rejects oversized initial and resize terminal buffers through MCP before lau
     expect(result.content).toContainEqual(
       expect.objectContaining({
         type: "text",
-        text: expect.stringContaining("1000000"),
+        text: expect.stringContaining(diagnostic),
       }),
     );
     await expect(access(marker)).rejects.toMatchObject({ code: "ENOENT" });
   }
+  // Clients validating the advertised contract reject the same names.
+  const advertised = (await client.listTools()).tools.find(
+    ({ name }) => name === "capture_process_scenario",
+  )?.inputSchema;
+  if (advertised === undefined)
+    throw new Error("Missing process capture input schema");
+  const validate = new Ajv2020({
+    strict: false,
+    validateFormats: false,
+  }).compile(z.record(z.string(), z.unknown()).parse(advertised));
+  for (const [environment, admitted] of [
+    [{ NORMAL_CAPTURE_KEY: "caller-value" }, true],
+    [{ REA_PROCESS_RUN_ID: "caller-value" }, false],
+    [JSON.parse('{"__proto__":"caller-value"}') as unknown, false],
+  ] as const)
+    expect(validate({ executable: process.execPath, environment })).toBe(
+      admitted,
+    );
   await client.ping();
 });
 

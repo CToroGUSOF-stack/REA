@@ -221,7 +221,10 @@ resource limits, and normalization settings have defaults; see
 from launch, must be ordered, and must fall within `timeout_ms`. Inputs marked
 `sensitive` are sent to the process but persisted as a byte-count placeholder.
 Environment overrides are recorded in the scenario commitment; inherited
-values are not copied into Evidence.
+values are not copied into Evidence. REA rejects `REA_PROCESS_RUN_ID`, which it
+reserves for process ownership, and `__proto__`, which the PTY backend drops
+before launch. To set `__proto__`, run `/usr/bin/env` as the executable with
+`__proto__=VALUE` before the command in `arguments`.
 
 Terminal dimensions must satisfy `columns × (rows + scrollback) ≤ 1,000,000`.
 Every scheduled resize uses the same selected scrollback and must fit this

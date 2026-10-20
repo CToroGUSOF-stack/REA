@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import canonicalize from "canonicalize";
 import { z } from "zod";
 
+import { ownKeyRecordSchema } from "../ownKeyRecordSchema.js";
+
 const positiveBudget = z.number().int().safe().positive();
 /** Read the explicitly committed output budget without applying scenario defaults. */
 export const processScenarioOutputBudgetProjectionSchema = z
@@ -14,36 +16,61 @@ export const processScenarioOutputBudgetProjectionSchema = z
  */
 export const PROCESS_TERMINAL_CELL_BUDGET = 1_000_000;
 const timedEventBase = { at_ms: z.number().int().safe().nonnegative() };
-const reservedRunIdEnvironmentName = "REA_PROCESS_RUN_ID";
 const ENVIRONMENT_NAME_CHARACTER = "[^=\\x00]";
+/** Names a scenario cannot select, with the reason each one is refused. */
+const reservedEnvironmentNames = new Map([
+  [
+    "REA_PROCESS_RUN_ID",
+    "REA_PROCESS_RUN_ID is reserved by the process adapter",
+  ],
+  // The PTY backend copies the environment by property assignment, which
+  // drops this name before launch.
+  [
+    "__proto__",
+    "__proto__ cannot reach the captured process because the PTY backend drops it before launch; run /usr/bin/env with __proto__=VALUE before the command instead",
+  ],
+]);
 
 /**
- * Nonempty environment names other than the reserved run identifier. The
- * exclusion is spelled as a complement instead of a negative look-ahead,
- * because RE2 and Rust schema validators reject look-around and would refuse
- * every tool in the advertised catalog.
+ * Nonempty environment names other than the reserved names. The exclusion is
+ * spelled as a complement instead of a negative look-ahead, because RE2 and
+ * Rust schema validators reject look-around and would refuse every tool in the
+ * advertised catalog. Reserved names contain no regular-expression syntax.
  */
-const environmentNamePattern = (reserved: string): RegExp => {
-  // After the complete reserved name, at least one more character is needed.
-  let rest = `${ENVIRONMENT_NAME_CHARACTER}+`;
-  for (let index = reserved.length - 1; index >= 0; index -= 1) {
-    const character = reserved[index] ?? "";
-    // Diverge here, match the next reserved character, or (after a nonempty
-    // prefix) end the name early.
-    const choice = `[^=\\x00${character}]${ENVIRONMENT_NAME_CHARACTER}*|${character}${rest}`;
-    rest = index === 0 ? choice : `(?:${choice})?`;
-  }
-  return new RegExp(`^(?:${rest})$`, "u");
+const environmentNamePattern = (reserved: readonly string[]): RegExp => {
+  // The rest of a name that begins with `prefix`, a prefix of a reserved name.
+  const rest = (prefix: string): string => {
+    const next = [
+      ...new Set(
+        reserved
+          .filter(
+            (name) => name.length > prefix.length && name.startsWith(prefix),
+          )
+          .map((name) => name.charAt(prefix.length)),
+      ),
+    ];
+    // After a complete reserved name, at least one more character is needed.
+    if (next.length === 0) return `${ENVIRONMENT_NAME_CHARACTER}+`;
+    // Diverge here, match a reserved name's next character, or (after a
+    // nonempty prefix that is not itself reserved) end the name early.
+    const choice = [
+      `[^=\\x00${next.join("")}]${ENVIRONMENT_NAME_CHARACTER}*`,
+      ...next.map((character) => `${character}${rest(prefix + character)}`),
+    ].join("|");
+    if (prefix === "") return choice;
+    return reserved.includes(prefix) ? `(?:${choice})` : `(?:${choice})?`;
+  };
+  return new RegExp(`^(?:${rest("")})$`, "u");
 };
 
 const environmentName = z
   .string()
   .min(1, "Environment names must not be empty")
-  .regex(environmentNamePattern(reservedRunIdEnvironmentName), {
+  .regex(environmentNamePattern([...reservedEnvironmentNames.keys()]), {
     error: (issue) =>
-      issue.input === reservedRunIdEnvironmentName
-        ? `${reservedRunIdEnvironmentName} is reserved by the process adapter`
-        : "Environment names cannot contain '=' or NUL",
+      (typeof issue.input === "string"
+        ? reservedEnvironmentNames.get(issue.input)
+        : undefined) ?? "Environment names cannot contain '=' or NUL",
   });
 const childProcessString = z
   .string()
@@ -153,7 +180,10 @@ export const processScenarioSchema = z
     executable: childProcessString.min(1),
     arguments: z.array(childProcessString).default([]),
     working_directory: childProcessString.default("."),
-    environment: z.record(environmentName, childProcessString).default({}),
+    environment: ownKeyRecordSchema(
+      environmentName,
+      childProcessString,
+    ).default({}),
     filesystem_observation_paths: z
       .array(childProcessString.min(1))
       .default([]),
