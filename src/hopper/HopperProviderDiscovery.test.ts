@@ -95,7 +95,7 @@ const databaseTarget = (): BinaryTarget => ({
 
 const executableTarget = (
   format: "mach-o" | "elf" | "pe",
-  architecture: "x86" | "x86_64" | "arm" | "arm64",
+  architecture: "x86" | "x86_64" | "arm64",
 ): BinaryTarget =>
   format === "pe"
     ? {

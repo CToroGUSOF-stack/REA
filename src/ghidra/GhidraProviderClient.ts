@@ -23,6 +23,10 @@ import {
   sameGhidraDisabledAnalyzers,
   sameGhidraLanguageOverride,
 } from "./GhidraAnalysisProfile.js";
+import {
+  ghidraArmLanguageOverride,
+  ghidraPinnedArmLanguage,
+} from "./GhidraArmProfile.js";
 import { ghidraPinnedMipsLanguage } from "./GhidraMipsProfile.js";
 import type { AnalysisProfileCommitment } from "../domain/analysisProfile.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
@@ -213,14 +217,19 @@ export const createGhidraProviderClient = (input: {
   const parameterLanguage = ghidraProfileLanguageOverride(
     committedProfile.parameters,
   );
-  const pinnedLanguage = ghidraPinnedMipsLanguage(committedProfile.parameters);
-  const targetLanguage = ghidraPinnedLanguage(target);
+  const pinnedArmLanguage = ghidraPinnedArmLanguage(
+    committedProfile.parameters,
+  );
+  const pinnedLanguage =
+    pinnedArmLanguage ?? ghidraPinnedMipsLanguage(committedProfile.parameters);
+  const targetLanguage =
+    ghidraPinnedLanguage(target) ?? ghidraArmLanguageOverride(target);
   if (pinnedLanguage !== undefined && targetLanguage === undefined)
     return err(
       new ProviderAdapterError("ghidra", "open_binary", {
         diagnostics: {
           reason:
-            "The committed profile pins a MIPS language that the current target does not establish; reopen an admitted target to resolve a new profile.",
+            "The committed profile pins a processor language that the current target does not establish; reopen an admitted target to resolve a new profile.",
         },
       }),
     );
@@ -235,7 +244,7 @@ export const createGhidraProviderClient = (input: {
       new ProviderAdapterError("ghidra", "open_binary", {
         diagnostics: {
           reason:
-            "The committed legacy MIPS profile pins its import language; REA_GHIDRA_LANGUAGE_ID/REA_GHIDRA_COMPILER_SPEC_ID cannot be combined with it. Reopen the target without the override.",
+            "The committed provider profile pins its import language; REA_GHIDRA_LANGUAGE_ID/REA_GHIDRA_COMPILER_SPEC_ID cannot be combined with it. Reopen the target without the override.",
         },
       }),
     );
@@ -313,6 +322,18 @@ export const createGhidraProviderClient = (input: {
         ]
       : []),
     ...(target.architecture === "mips" ? (target.mips.limitations ?? []) : []),
+    ...(pinnedArmLanguage === undefined
+      ? []
+      : [
+          "The ARM lane pins the ARM:LE:32:v7 import language and checks it after import; Ghidra header auto-selection is not used for this admission.",
+        ]),
+    ...(target.kind === "executable" &&
+    target.architecture === "arm" &&
+    target.format === "elf"
+      ? [
+          "ARM and Thumb-2 interworking is analyzed per instruction set state; the ELF float ABI declaration does not change the modeled calling convention.",
+        ]
+      : []),
     ...(committedProfile.parameters.mips_abi_basis ===
     "inferred-o32-assumption-v1"
       ? [
@@ -378,6 +399,7 @@ export const createGhidraProviderClient = (input: {
       ...(config.ghidraDisabledAnalyzers === undefined
         ? {}
         : { disabledAnalyzers: config.ghidraDisabledAnalyzers }),
+
       ...(seeds === undefined ? {} : { analysisSeeds: seeds }),
       platform: installation.platform,
       ...(extensions.length === 0 ? {} : { analysisExtensions: extensions }),
