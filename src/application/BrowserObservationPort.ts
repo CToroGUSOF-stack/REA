@@ -2,9 +2,11 @@ import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import type {
   InspectWebPageInput,
   ListBrowserTargetsInput,
+  WakeBrowserTargetsInput,
 } from "../domain/browserObservation.js";
 import type {
   BrowserTargetList,
+  BrowserTargetWake,
   WebPageInspection,
 } from "../domain/browserObservationSchemas.js";
 import type { Result } from "../domain/result.js";
@@ -42,6 +44,10 @@ export interface BrowserObservationPort {
     input: ListBrowserTargetsInput,
     options?: ExecutionOptions,
   ): Promise<Result<BrowserTargetList, AnalysisError>>;
+  wakeTargets(
+    input: WakeBrowserTargetsInput,
+    options?: ExecutionOptions,
+  ): Promise<Result<BrowserTargetWake, AnalysisError>>;
   inspectPage(
     input: InspectWebPageInput,
     options?: ExecutionOptions,

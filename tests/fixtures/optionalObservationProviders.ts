@@ -39,6 +39,7 @@ export const optionalObservationFactories = (
         limitations: ["Recording port; no real browser was connected."],
       });
     },
+    wakeTargets: unselected,
     inspectPage: unselected,
     analyzeBundle: unselected,
     observeSession: unselected,

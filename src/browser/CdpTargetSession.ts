@@ -187,7 +187,8 @@ export const closeCdpTargetSession = async (
   await targetSession.connection.close();
 };
 
-const cleanupCdpTargetCommands = async (
+/** Disable enabled domains and detach the browser session without closing REA's socket. */
+export const cleanupCdpTargetCommands = async (
   targetSession: CdpTargetSession,
   enabledDomains: readonly string[],
   signal?: AbortSignal,

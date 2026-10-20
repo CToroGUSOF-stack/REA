@@ -2,6 +2,7 @@ import type { Evidence } from "../domain/evidence.js";
 import type {
   InspectWebPageInput,
   ListBrowserTargetsInput,
+  WakeBrowserTargetsInput,
 } from "../domain/browserObservation.js";
 import {
   webBundleAnalysisSchema,
@@ -143,6 +144,32 @@ export const observeWebSession = async (
         options,
       )
     : observed;
+};
+
+/** Boundedly classify selected browser targets and optionally revive them. */
+export const wakeBrowserTargets = async (
+  browser: BrowserObservationPort | undefined,
+  input: WakeBrowserTargetsInput,
+  options: ExecutionOptions = {},
+): Promise<Result<Evidence, AnalysisError>> => {
+  const ready = requireBrowser(browser, "wake_browser_targets");
+  if (!ready.ok) return ready;
+  if (options.signal?.aborted)
+    return err(
+      new AnalysisCancelledError("wake_browser_targets", {
+        cause: options.signal.reason,
+      }),
+    );
+  const woken = await ready.value.wakeTargets(input, options);
+  return woken.ok
+    ? browserEvidence(
+        "wake_browser_targets",
+        input,
+        woken.value,
+        ready.value.identity(),
+        options,
+      )
+    : woken;
 };
 
 /** Discover WebMCP declarations without exposing an invocation surface. */

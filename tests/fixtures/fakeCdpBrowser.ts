@@ -21,6 +21,10 @@ export const startFakeCdpBrowser = async (
   options: FakeOptions = {},
 ): Promise<FakeCdpBrowser> => {
   const commands: FakeCdpCommand[] = [];
+  const discardedTargetIds = new Set(options.discardedTargetIds ?? []);
+  const discardedReviveDelayMs = options.discardedReviveDelayMs ?? 0;
+  const revivalAtByTarget = new Map<string, number>();
+  let discardedReloads = 0;
   const httpRequests: {
     url: string;
     authorization: string | undefined;
@@ -51,6 +55,12 @@ export const startFakeCdpBrowser = async (
   });
   webSockets.on("connection", (socket: WebSocket, request: IncomingMessage) => {
     const directPage = request.url?.startsWith("/devtools/page/") === true;
+    const socketTargetId = directPage
+      ? (request.url ?? "").slice("/devtools/page/".length) || undefined
+      : undefined;
+    // Sessions attached over the browser socket map to their target for
+    // discarded-stall routing; the stock producer answer carries session-1.
+    const attachedTargets = new Map<string, string>();
     openedConnections += 1;
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
@@ -67,6 +77,31 @@ export const startFakeCdpBrowser = async (
         return;
       }
       if (options.hangOnMethod === command.method) return;
+      if (discardedTargetIds.size > 0) {
+        const stalledTarget = stalledDiscardedTarget(
+          command,
+          socketTargetId,
+          attachedTargets,
+          discardedTargetIds,
+        );
+        if (command.method === "Target.attachToTarget" && !directPage) {
+          const attachedId = command.params.targetId;
+          if (typeof attachedId === "string")
+            attachedTargets.set(command.sessionId ?? "session-1", attachedId);
+        }
+        if (stalledTarget !== undefined && command.method === "Page.reload") {
+          discardedReloads += 1;
+          // The navigation primes a renderer that answers after its delay.
+          revivalAtByTarget.set(
+            stalledTarget,
+            Date.now() + discardedReviveDelayMs,
+          );
+        }
+        if (stalledTarget !== undefined && command.method === "Page.enable") {
+          const revivalAt = revivalAtByTarget.get(stalledTarget);
+          if (revivalAt === undefined || Date.now() < revivalAt) return;
+        }
+      }
       if (options.malformedMessageOnMethod === command.method) {
         socket.send("{not-json");
         return;
@@ -111,6 +146,7 @@ export const startFakeCdpBrowser = async (
       for (const socket of sockets) socket.send(JSON.stringify(event));
     },
     httpRequests,
+    discardedReloadCount: () => discardedReloads,
     async close() {
       for (const socket of sockets) socket.terminate();
       await new Promise<void>((resolve) => webSockets.close(() => resolve()));
@@ -183,6 +219,23 @@ const boundPort = (
 };
 
 /** Every ordinary reply uses the request's flattened target session. */
+/** Resolve the discarded target a command would ship to, if its renderer is absent. */
+const stalledDiscardedTarget = (
+  command: FakeCdpCommand,
+  socketTargetId: string | undefined,
+  attachedTargets: ReadonlyMap<string, string>,
+  discardedTargetIds: ReadonlySet<string>,
+): string | undefined => {
+  const candidate =
+    socketTargetId ??
+    (command.sessionId === undefined
+      ? undefined
+      : attachedTargets.get(command.sessionId));
+  return candidate !== undefined && discardedTargetIds.has(candidate)
+    ? candidate
+    : undefined;
+};
+
 const sendCommandReply = (
   socket: WebSocket,
   command: FakeCdpCommand,

@@ -18,6 +18,7 @@ import {
   inspectWebPage,
   listBrowserTargets,
   observeWebSession,
+  wakeBrowserTargets,
 } from "../application/BrowserObservationService.js";
 import type { ProgressReporter } from "../application/ProgressReporter.js";
 import { toolContract } from "../contracts/toolContracts.js";
@@ -54,6 +55,7 @@ export const registerBrowserTools = (
 ): void => {
   const registration = { ...options, delivery: server.delivery, server };
   const listContract = toolContract("list_browser_targets");
+  const wakeContract = toolContract("wake_browser_targets");
   const inspectContract = toolContract("inspect_web_page");
   const analyzeContract = toolContract("analyze_web_bundle");
   const sessionContract = toolContract("observe_web_session");
@@ -72,6 +74,20 @@ export const registerBrowserTools = (
         { input, context },
         (parsed, { signal }) =>
           listBrowserTargets(options.browser, parsed, {
+            signal,
+          }),
+      ),
+  );
+  server.registerTool(
+    wakeContract.name,
+    toolRegistrationOptions(wakeContract),
+    (input, context) =>
+      runBrowserTool(
+        registration,
+        wakeContract,
+        { input, context },
+        (parsed, { signal }) =>
+          wakeBrowserTargets(options.browser, parsed, {
             signal,
           }),
       ),

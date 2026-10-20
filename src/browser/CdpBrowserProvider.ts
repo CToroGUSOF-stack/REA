@@ -5,11 +5,16 @@ import {
   sanitizeBrowserUrl,
   type InspectWebPageInput,
   type ListBrowserTargetsInput,
+  type WakeBrowserTargetsInput,
 } from "../domain/browserObservation.js";
 import {
   browserTargetListSchema,
+  browserTargetWakeSchema,
   webPageInspectionSchema,
   type BrowserTargetList,
+  type BrowserTargetWake,
+  type BrowserTargetWakeFailureReason,
+  type BrowserTargetWakeOutcome,
   type WebPageInspection,
 } from "../domain/browserObservationSchemas.js";
 import { IsolatedWebBundleAnalyzer } from "./IsolatedWebBundleAnalyzer.js";
@@ -53,7 +58,10 @@ import {
 import { BrowserObservationError } from "../domain/browserObservationError.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
-import type { BrowserObservationOperation } from "../domain/browserObservationErrors.js";
+import type {
+  BrowserObservationFailureReason,
+  BrowserObservationOperation,
+} from "../domain/browserObservationErrors.js";
 import { err, ok, type Result } from "../domain/result.js";
 import {
   hasCdpTargetWebSocket,
@@ -62,9 +70,11 @@ import {
 } from "./CdpEndpoint.js";
 import {
   attachCdpTargetSession,
+  cleanupCdpTargetCommands,
   closeCdpTargetSession,
   openCdpEndpoint,
   openCdpTargetSession,
+  type CdpOpenedEndpoint,
   type CdpTargetSession,
 } from "./CdpTargetSession.js";
 import { capturePage, type CapturedPage } from "./CdpPageCapture.js";
@@ -88,6 +98,173 @@ const CLEANUP_DOMAINS = [
   "Page",
   "WebMCP",
 ] as const;
+
+/** Bounded wake primitive outcome: responsive, deadline expired, or failed. */
+type WakeCommandOutcome =
+  | { readonly kind: "responsive" }
+  | { readonly kind: "deadline" }
+  | {
+      readonly kind: "failed";
+      readonly reason: BrowserTargetWakeFailureReason;
+    };
+
+/** Upper bound for one verification probe; a revived renderer answers within one. */
+const WAKE_POLL_MAX_WAIT_MS = 500;
+
+/** Pause between verification probes so stalled renderers are not hammered. */
+const WAKE_POLL_SPACING_MS = 100;
+
+/** Collapse CDP transport failures to the wake outcome's failure-reason set. */
+const wakeCollapseReason = (
+  reason: BrowserObservationFailureReason,
+): BrowserTargetWakeFailureReason =>
+  reason === "disconnected" ? "disconnected" : "protocol_error";
+
+/** Read abort state through a function boundary so property narrowing resets. */
+const wakeAborted = (signal: AbortSignal | undefined): boolean =>
+  signal?.aborted === true;
+
+/** Per-target failures classify into results; unreferenced reasons escalate. */
+const wakeSelectionFailureReason = (
+  cause: unknown,
+): BrowserTargetWakeFailureReason | undefined => {
+  if (!(cause instanceof BrowserObservationError)) return undefined;
+  switch (cause.reason) {
+    case "target_not_found":
+    case "target_not_allowed":
+      return cause.reason;
+    case "protocol_error":
+    case "disconnected":
+    case "invalid_endpoint_response":
+      return "protocol_error";
+    default:
+      return undefined;
+  }
+};
+
+/** Send one CDP command raced against a bounded deadline; late replies are consumed. */
+const wakeCommandOutcome = (
+  targetSession: CdpTargetSession,
+  method: string,
+  params: Readonly<Record<string, unknown>>,
+  deadlineMs: number,
+  signal: AbortSignal | undefined,
+): Promise<WakeCommandOutcome> =>
+  new Promise((resolve) => {
+    let settled = false;
+    const settle = (outcome: WakeCommandOutcome): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(outcome);
+    };
+    const timer = setTimeout(() => settle({ kind: "deadline" }), deadlineMs);
+    timer.unref();
+    void targetSession.connection
+      .send(method, params, targetSession.sessionId, signal)
+      .then(
+        () => settle({ kind: "responsive" }),
+        (cause: unknown) =>
+          settle({
+            kind: "failed",
+            reason:
+              cause instanceof BrowserObservationError
+                ? wakeCollapseReason(cause.reason)
+                : "protocol_error",
+          }),
+      );
+  });
+
+/** Yield to the event loop between verification probes, honoring cancellation. */
+const wakePause = (
+  ms: number,
+  signal: AbortSignal | undefined,
+): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (wakeAborted(signal)) {
+      reject(
+        new AnalysisCancelledError("wake_browser_targets", {
+          cause: signal?.reason,
+        }),
+      );
+      return;
+    }
+    let settled = false;
+    const abort = (): void => {
+      settle();
+      reject(
+        new AnalysisCancelledError("wake_browser_targets", {
+          cause: signal?.reason,
+        }),
+      );
+    };
+    const settle = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    };
+    const timer = setTimeout(settle, ms);
+    timer.unref();
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+
+/**
+ * Probe until the target answers, the wake window expires, or CDP reports an
+ * unusable transport. Undefined callers check cancellation before the result
+ * is trusted: every deadline resolution re-verifies the caller's signal.
+ */
+const wakeVerifyResponsive = async (
+  targetSession: CdpTargetSession,
+  wakeDeadlineAtMs: number,
+  signal: AbortSignal | undefined,
+): Promise<true | BrowserTargetWakeFailureReason> => {
+  for (;;) {
+    if (wakeAborted(signal))
+      throw new AnalysisCancelledError("wake_browser_targets", {
+        cause: signal?.reason,
+      });
+    const remainingMs = wakeDeadlineAtMs - Date.now();
+    if (remainingMs <= 0) return "timeout";
+    const probe = await wakeCommandOutcome(
+      targetSession,
+      "Page.enable",
+      {},
+      Math.min(remainingMs, WAKE_POLL_MAX_WAIT_MS),
+      signal,
+    );
+    if (wakeAborted(signal))
+      throw new AnalysisCancelledError("wake_browser_targets", {
+        cause: signal?.reason,
+      });
+    if (probe.kind === "responsive") return true;
+    if (probe.kind === "failed") return probe.reason;
+    const pauseMs = Math.min(
+      WAKE_POLL_SPACING_MS,
+      Math.max(0, wakeDeadlineAtMs - Date.now()),
+    );
+    if (pauseMs > 0) await wakePause(pauseMs, signal);
+  }
+};
+
+/**
+ * Release one wake session. A shared browser socket stays open for later
+ * targets; the caller releases it once after the last selection.
+ */
+const closeWakeTargetSession = async (
+  targetSession: CdpTargetSession,
+  sharedWithEndpoint: boolean,
+  releaseSharedSocket: boolean,
+  signal?: AbortSignal,
+  owner?: CdpTargetSessionOwner,
+): Promise<void> => {
+  if (sharedWithEndpoint && owner !== undefined && !releaseSharedSocket) {
+    await cleanupCdpTargetCommands(targetSession, CLEANUP_DOMAINS, signal);
+    return;
+  }
+  await closeCdpTargetSession(targetSession, CLEANUP_DOMAINS, signal, owner);
+};
 
 /** Passive browser observation through a selected user-owned CDP endpoint. */
 export class CdpBrowserProvider implements BrowserObservationPort {
@@ -168,6 +345,117 @@ export class CdpBrowserProvider implements BrowserObservationPort {
       );
     } catch (cause: unknown) {
       return err(providerError(cause, "list_browser_targets", options.signal));
+    }
+  }
+
+  async wakeTargets(
+    input: WakeBrowserTargetsInput,
+    options: ExecutionOptions = {},
+  ): Promise<Result<BrowserTargetWake, AnalysisError>> {
+    let endpoint: CdpOpenedEndpoint | undefined;
+    const results: BrowserTargetWakeOutcome[] = [];
+    const limitations: string[] = [];
+    try {
+      if (wakeAborted(options.signal))
+        throw new AnalysisCancelledError("wake_browser_targets", {
+          cause: options?.signal?.reason,
+        });
+      endpoint = await openCdpEndpoint(
+        input.cdp_endpoint,
+        "wake_browser_targets",
+        options.signal,
+        undefined,
+        this.#owner,
+      );
+      const ordered: string[] = [];
+      for (const targetId of input.target_ids)
+        if (!ordered.includes(targetId)) ordered.push(targetId);
+      if (ordered.length < input.target_ids.length)
+        limitations.push("Duplicate target IDs were classified once.");
+      for (let index = 0; index < ordered.length; index += 1) {
+        if (wakeAborted(options.signal))
+          throw new AnalysisCancelledError("wake_browser_targets", {
+            cause: options?.signal?.reason,
+          });
+        const targetId = ordered[index] as string;
+        const selectionStartAtMs = Date.now();
+        let targetSession: CdpTargetSession | undefined;
+        try {
+          const authorized = authorizeCdpTarget(
+            endpoint.discovery,
+            { target_id: targetId, allowed_origins: input.allowed_origins },
+            "wake_browser_targets",
+          );
+          targetSession =
+            endpoint.connection !== undefined
+              ? await attachCdpTargetSession(
+                  endpoint.connection,
+                  authorized.target,
+                  "wake_browser_targets",
+                  options.signal,
+                  this.#owner,
+                )
+              : await openCdpTargetSession(
+                  endpoint.discovery,
+                  authorized.target,
+                  "wake_browser_targets",
+                  options.signal,
+                  undefined,
+                  this.#owner,
+                );
+          results.push(
+            await this.#wakeOneTarget(
+              authorized.target.id,
+              targetSession,
+              input,
+              options,
+            ),
+          );
+        } catch (cause: unknown) {
+          if (cause instanceof AnalysisCancelledError) throw cause;
+          const reason = wakeSelectionFailureReason(cause);
+          if (reason === undefined) throw cause;
+          results.push({
+            target_id: targetId,
+            status: "unknown",
+            elapsed_ms: Math.max(0, Date.now() - selectionStartAtMs),
+            reload_sent: false,
+            failure_reason: reason,
+          });
+        } finally {
+          if (targetSession !== undefined)
+            await closeWakeTargetSession(
+              targetSession,
+              endpoint.connection !== undefined &&
+                targetSession.connection === endpoint.connection,
+              index === ordered.length - 1,
+              options.signal,
+              this.#owner,
+            );
+        }
+      }
+      if (endpoint.connection !== undefined)
+        await this.#owner.finish(endpoint.connection);
+      if (input.revive === "none")
+        limitations.push(
+          "Probe-only wake changed no target; deadline-stalled targets stay unverified without the caller-opted reload revival.",
+        );
+      const stale = results.filter(
+        (result) => result.status === "unknown",
+      ).length;
+      if (stale > 0)
+        limitations.push(
+          `${String(stale)} selected target(s) stayed unverified within the reported deadlines.`,
+        );
+      return ok(
+        browserTargetWakeSchema.parse({
+          browser: endpoint.discovery.version,
+          results,
+          limitations,
+        }),
+      );
+    } catch (cause: unknown) {
+      return err(providerError(cause, "wake_browser_targets", options.signal));
     }
   }
 
@@ -326,6 +614,74 @@ export class CdpBrowserProvider implements BrowserObservationPort {
         );
       return err(providerError(cause, "compare_web_screenshots"));
     }
+  }
+
+  /** Classify one target, revive deadline-stalled renderers on request. */
+  async #wakeOneTarget(
+    targetId: string,
+    targetSession: CdpTargetSession,
+    input: WakeBrowserTargetsInput,
+    options: ExecutionOptions,
+  ): Promise<BrowserTargetWakeOutcome> {
+    const startAtMs = Date.now();
+    const outcome = (
+      status: BrowserTargetWakeOutcome["status"],
+      reloadSent: boolean,
+      failureReason?: BrowserTargetWakeFailureReason,
+    ): BrowserTargetWakeOutcome => ({
+      target_id: targetId,
+      status,
+      elapsed_ms: Math.max(0, Date.now() - startAtMs),
+      reload_sent: reloadSent,
+      ...(failureReason === undefined ? {} : { failure_reason: failureReason }),
+    });
+
+    const responsive = await wakeCommandOutcome(
+      targetSession,
+      "Page.enable",
+      {},
+      input.probe_deadline_ms,
+      options.signal,
+    );
+    if (wakeAborted(options.signal))
+      throw new AnalysisCancelledError("wake_browser_targets", {
+        cause: options?.signal?.reason,
+      });
+    if (responsive.kind === "responsive") return outcome("awake", false);
+    if (
+      responsive.kind === "failed" &&
+      (responsive.reason === "protocol_error" ||
+        responsive.reason === "disconnected")
+    )
+      return outcome("unknown", false, responsive.reason);
+    if (input.revive === "none") return outcome("unknown", false, "timeout");
+
+    const wakeDeadlineAtMs = Date.now() + input.wake_deadline_ms;
+    const reload = await wakeCommandOutcome(
+      targetSession,
+      "Page.reload",
+      { ignoreCache: false },
+      Math.min(
+        input.probe_deadline_ms,
+        Math.max(0, wakeDeadlineAtMs - Date.now()),
+      ),
+      options.signal,
+    );
+    if (wakeAborted(options.signal))
+      throw new AnalysisCancelledError("wake_browser_targets", {
+        cause: options?.signal?.reason,
+      });
+    const reloadSent = reload.kind === "responsive";
+    if (reload.kind === "failed" && reload.reason !== "timeout")
+      return outcome("unknown", reloadSent, reload.reason);
+    const verified = await wakeVerifyResponsive(
+      targetSession,
+      wakeDeadlineAtMs,
+      options.signal,
+    );
+    return verified === true
+      ? outcome("awake_after_reload", reloadSent)
+      : outcome("unknown", reloadSent, verified);
   }
 
   async #capture(

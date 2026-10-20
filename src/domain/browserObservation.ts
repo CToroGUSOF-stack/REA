@@ -174,6 +174,36 @@ export const listBrowserTargetsInputSchema = z.strictObject({
   ...browserInput,
 });
 
+/** Caller-selected effect applied to targets that fail the bounded probe. */
+export const browserTargetReviveEffectSchema = z.enum(["none", "reload"]);
+
+/** Public input for bounded wake classification of selected page targets. */
+export const wakeBrowserTargetsInputSchema = z.strictObject({
+  ...browserInput,
+  target_ids: z.array(z.string().trim().min(1)).min(1),
+  probe_deadline_ms: z
+    .number()
+    .int()
+    .min(1)
+    .default(2000)
+    .describe("Bounded Page.enable probe deadline per target in milliseconds"),
+  wake_deadline_ms: z
+    .number()
+    .int()
+    .min(1)
+    .default(10000)
+    .describe(
+      "Revival verification budget per target in milliseconds, starting at the reload effect",
+    ),
+  revive: browserTargetReviveEffectSchema
+    .default("none")
+    .describe("Effect for targets that fail the probe; none avoids mutations"),
+});
+
+export type WakeBrowserTargetsInput = z.infer<
+  typeof wakeBrowserTargetsInputSchema
+>;
+
 const inspectWebPageInputFacts = {
   ...browserInput,
   target_id: z.string().trim().min(1),

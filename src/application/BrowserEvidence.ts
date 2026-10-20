@@ -9,9 +9,11 @@ import { sanitizeBrowserUrl } from "../domain/browserObservation.js";
 import type {
   InspectWebPageInput,
   ListBrowserTargetsInput,
+  WakeBrowserTargetsInput,
 } from "../domain/browserObservation.js";
 import type {
   BrowserTargetList,
+  BrowserTargetWake,
   WebPageInspection,
 } from "../domain/browserObservationSchemas.js";
 import type {
@@ -41,6 +43,7 @@ import type {
 type BrowserEvidenceInput =
   | ListBrowserTargetsInput
   | InspectWebPageInput
+  | WakeBrowserTargetsInput
   | AnalyzeWebBundleInput
   | ObserveWebSessionInput
   | DiscoverWebMcpToolsInput
@@ -50,6 +53,7 @@ type BrowserEvidenceInput =
 type BrowserEvidenceResult =
   | BrowserTargetList
   | WebPageInspection
+  | BrowserTargetWake
   | WebBundleAnalysis
   | WebObservationSession
   | WebMcpDiscovery
@@ -59,6 +63,7 @@ type BrowserEvidenceResult =
 type BrowserEvidenceOperation =
   | "list_browser_targets"
   | "inspect_web_page"
+  | "wake_browser_targets"
   | "analyze_web_bundle"
   | "observe_web_session"
   | "discover_webmcp_tools"
@@ -139,6 +144,14 @@ const browserParameters = (
           ? [observedOrigin]
           : [],
   };
+  if ("target_ids" in input)
+    return {
+      ...scope,
+      target_ids: input.target_ids,
+      probe_deadline_ms: input.probe_deadline_ms,
+      wake_deadline_ms: input.wake_deadline_ms,
+      revive: input.revive,
+    };
   if (!("target_id" in input)) return scope;
   return {
     ...scope,
@@ -205,6 +218,8 @@ const browserPredicate = (operation: BrowserEvidenceOperation): string => {
   switch (operation) {
     case "list_browser_targets":
       return "rea.browser-target-list";
+    case "wake_browser_targets":
+      return "rea.browser-target-wake";
     case "inspect_web_page":
       return "rea.web-page-inspection";
     case "analyze_web_bundle":

@@ -1,6 +1,7 @@
 /** Public browser, Electron, Inspector, and scenario operations. */
 export type BrowserObservationOperation =
   | "list_browser_targets"
+  | "wake_browser_targets"
   | "inspect_web_page"
   | "analyze_web_bundle"
   | "trace_web_module_imports"

@@ -6,11 +6,13 @@ import {
   inspectWebPage,
   listBrowserTargets,
   observeWebSession,
+  wakeBrowserTargets,
 } from "../application/BrowserObservationService.js";
 import { logCliCommand } from "../cliLogging.js";
 import {
   inspectWebPageInputSchema,
   listBrowserTargetsInputSchema,
+  wakeBrowserTargetsInputSchema,
 } from "../domain/browserObservation.js";
 import { analyzeWebBundleInputSchema } from "../domain/webBundleAnalysis.js";
 import { observeWebSessionInputSchema } from "../domain/browserSession.js";
@@ -31,6 +33,7 @@ export const registerBrowserCommands = (
   logger: Logger,
 ): void => {
   registerTargetList(cli, logger);
+  registerTargetWake(cli, logger);
   registerPageInspection(cli, logger);
   registerBundleAnalysis(cli, logger);
   registerObservationSession(cli, logger);
@@ -75,6 +78,86 @@ const registerTargetList = (
             },
             context.provider.identity().id,
             "list_browser_targets",
+            signal,
+          );
+        }),
+      ),
+  });
+};
+
+const registerTargetWake = (
+  cli: ReturnType<typeof Cli.create>,
+  logger: Logger,
+): void => {
+  cli.command(CLI_COMMANDS.wakeBrowserTargets, {
+    description:
+      "Boundedly classify selected page targets as responsive or deadline-stalled, with an opt-in reload revival for stalled targets",
+    args: z.object({
+      endpoint: z
+        .string()
+        .describe("Loopback CDP HTTP endpoint or browser WebSocket URL"),
+      targetId: z
+        .array(z.string().min(1))
+        .min(1)
+        .describe(
+          "Target IDs from list-browser-targets; repeat the flag for each target",
+        ),
+    }),
+    options: z.object({
+      ...browserScopeOptions,
+      probeDeadlineMs: z
+        .number()
+        .int()
+        .min(1)
+        .default(2000)
+        .describe(
+          "Bounded Page.enable probe deadline per target in milliseconds",
+        ),
+      wakeDeadlineMs: z
+        .number()
+        .int()
+        .min(1)
+        .default(10000)
+        .describe(
+          "Revival verification budget per target in milliseconds, starting at the reload effect",
+        ),
+      revive: z
+        .enum(["none", "reload"])
+        .default("none")
+        .describe(
+          "Effect for targets that fail the probe; none avoids mutations",
+        ),
+    }),
+    run: ({ args, options }) =>
+      withCommandCancellation((signal) =>
+        logCliCommand(logger, "wake-browser-targets", async () => {
+          const context = browserContext();
+          const input = {
+            cdp_endpoint: args.endpoint,
+            allowed_origins: options.allowedOrigins,
+            target_ids: args.targetId,
+            probe_deadline_ms: options.probeDeadlineMs,
+            wake_deadline_ms: options.wakeDeadlineMs,
+            revive: options.revive,
+          };
+          const parsed = wakeBrowserTargetsInputSchema.safeParse(input);
+          if (!parsed.success)
+            return browserCliError(
+              analysisInputErrorFromIssues(
+                "wake_browser_targets",
+                parsed.error.issues,
+                input,
+              ),
+            );
+          return await finishAnalysisCommand(
+            () => wakeBrowserTargets(context.provider, parsed.data, { signal }),
+            {
+              close: async () => {
+                await context.provider.close?.();
+              },
+            },
+            context.provider.identity().id,
+            "wake_browser_targets",
             signal,
           );
         }),

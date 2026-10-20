@@ -2,9 +2,11 @@ import type { ToolContract } from "./toolContractTypes.js";
 import {
   inspectWebPageInputSchema,
   listBrowserTargetsInputSchema,
+  wakeBrowserTargetsInputSchema,
 } from "../domain/browserObservation.js";
 import {
   browserTargetListSchema,
+  browserTargetWakeSchema,
   webPageInspectionSchema,
 } from "../domain/browserObservationSchemas.js";
 import {
@@ -45,6 +47,7 @@ const captureDiffOutputSchema = evidenceResultOf(
 );
 const screenshotOutputSchema = evidenceResultOf(webScreenshotSchema);
 const screenshotDiffOutputSchema = evidenceResultOf(webScreenshotDiffSchema);
+const wakeOutputSchema = evidenceResultOf(browserTargetWakeSchema);
 
 const endpoint = "http://127.0.0.1:9222";
 const origin = "https://app.example.test";
@@ -148,6 +151,34 @@ export const BROWSER_TOOL_CONTRACTS = [
         title: "List browser page targets",
         input: {
           cdp_endpoint: endpoint,
+        },
+      },
+    ],
+  },
+  {
+    name: "wake_browser_targets",
+    ...toolContractMetadata("wake_browser_targets"),
+    description:
+      "Classify selected page targets from list_browser_targets as responsive or deadline-stalled using a bounded Page.enable probe at the selected CDP endpoint. For targets that fail the probe, optionally send the caller-opted navigation effect Page.reload and re-probe within a wake deadline. Report per-target outcomes with explicit unknowns and failure reasons. No JavaScript is evaluated, no storage is read, and no other state is mutated; with the default revive=none nothing on the page or browser is changed.",
+    kind: "browser-provider",
+    inputSchema: wakeBrowserTargetsInputSchema,
+    outputSchema: wakeOutputSchema,
+    examples: [
+      {
+        title: "Classify one target without mutating it",
+        input: {
+          cdp_endpoint: endpoint,
+          target_ids: ["TARGET_ID_FROM_LIST_BROWSER_TARGETS"],
+        },
+      },
+      {
+        title: "Revive a deadline-stalled target with one reload",
+        input: {
+          cdp_endpoint: endpoint,
+          target_ids: ["TARGET_ID_FROM_LIST_BROWSER_TARGETS"],
+          probe_deadline_ms: 2000,
+          wake_deadline_ms: 10000,
+          revive: "reload",
         },
       },
     ],

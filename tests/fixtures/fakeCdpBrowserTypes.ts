@@ -22,6 +22,8 @@ export interface FakeCdpBrowser {
     readonly params: unknown;
     readonly sessionId?: string;
   }): void;
+  /** Count of Page.reload commands received for simulated discarded targets. */
+  discardedReloadCount(): number;
   readonly httpRequests: readonly {
     readonly url: string;
     readonly authorization: string | undefined;
@@ -34,6 +36,14 @@ export interface FakeCdpBrowser {
 export interface FakeOptions {
   /** Send these commands' producer events before acknowledging completion, as a wire barrier. */
   readonly eventsBeforeReply?: readonly string[];
+  /**
+   * Simulate session-restored targets whose renderer is absent: renderer-bound
+   * commands (Page.enable) stall without replying until an acknowledged
+   * Page.reload primes revival after the configured delay.
+   */
+  readonly discardedTargetIds?: readonly string[];
+  /** Real milliseconds between an acknowledged Page.reload and restored command replies. */
+  readonly discardedReviveDelayMs?: number;
   /** Return a native-shaped command rejection through the actual wire parser. */
   readonly commandError?: (
     command: FakeCdpCommand,

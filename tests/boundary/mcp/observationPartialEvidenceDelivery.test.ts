@@ -83,6 +83,7 @@ it.each(operations)(
         browserObservation: {
           identity,
           listTargets: async () => err(cancellation.list_browser_targets),
+          wakeTargets: unused,
           inspectPage: unused,
           analyzeBundle: unused,
           observeSession: unused,

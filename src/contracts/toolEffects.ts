@@ -616,6 +616,13 @@ export const TOOL_EFFECTS: Readonly<Record<string, ToolEffects>> = {
   import_managed_reconstruction: sessionEvidence,
   project_managed_application_graph: sessionEvidence,
   list_browser_targets: browserEvidence,
+  wake_browser_targets: effects({
+    mutatesTarget: true,
+    mutatesSession: true,
+    accessesNetwork: true,
+    mayDiscardData: true,
+    idempotent: false,
+  }),
   inspect_web_page: browserEvidence,
   analyze_web_bundle: browserEvidence,
   observe_web_session: browserEvidence,

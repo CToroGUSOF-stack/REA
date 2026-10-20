@@ -41,6 +41,37 @@ export const browserTargetListSchema = z.object({
 });
 export type BrowserTargetList = z.infer<typeof browserTargetListSchema>;
 
+/** One per-target wake outcome; unknowns keep an explicit failure reason. */
+export const browserTargetWakeOutcomeSchema = z.object({
+  target_id: z.string(),
+  status: z.enum(["awake", "awake_after_reload", "unknown"]),
+  elapsed_ms: z.number().int().min(0),
+  reload_sent: z.boolean(),
+  failure_reason: z
+    .enum([
+      "target_not_found",
+      "target_not_allowed",
+      "protocol_error",
+      "disconnected",
+      "timeout",
+    ])
+    .optional(),
+});
+
+/** Bounded wake classification and opt-in revival outcome for selected targets. */
+export const browserTargetWakeSchema = z.object({
+  browser: browserVersionSchema,
+  results: z.array(browserTargetWakeOutcomeSchema),
+  limitations: z.array(z.string()),
+});
+export type BrowserTargetWakeOutcome = z.infer<
+  typeof browserTargetWakeOutcomeSchema
+>;
+export type BrowserTargetWake = z.infer<typeof browserTargetWakeSchema>;
+export type BrowserTargetWakeFailureReason = NonNullable<
+  z.infer<typeof browserTargetWakeOutcomeSchema>["failure_reason"]
+>;
+
 const browserFrameSchema = z.object({
   frame_id: z.string(),
   parent_frame_id: z.string().nullable(),

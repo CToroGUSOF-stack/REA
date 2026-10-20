@@ -36,6 +36,7 @@ afterEach(async () => {
 
 it(
   "exposes CLI-equivalent Evidence results and session tools",
+  // oxlint-disable-next-line max-lines-per-function -- one slot correlates the full browser evidence loop end to end.
   async () => {
     const browser = await startFakeCdpBrowser({
       sessionTimeline: "same_origin",
@@ -51,6 +52,7 @@ it(
     expect(tools.tools.map(({ name }) => name)).toEqual(
       expect.arrayContaining([
         "list_browser_targets",
+        "wake_browser_targets",
         "inspect_web_page",
         "analyze_web_bundle",
         "observe_web_session",
@@ -90,6 +92,57 @@ it(
         ]),
       },
     });
+    const wakeBrowser = await startFakeCdpBrowser({
+      discardedTargetIds: ["allowed-page"],
+      discardedReviveDelayMs: 40,
+    });
+    browsers.push(wakeBrowser);
+    const wakeOnly = await connected.client.callTool({
+      name: "wake_browser_targets",
+      arguments: {
+        cdp_endpoint: wakeBrowser.endpoint,
+        target_ids: ["allowed-page"],
+        probe_deadline_ms: 150,
+      },
+    });
+    expect(wakeOnly.isError).not.toBe(true);
+    expect(wakeOnly.structuredContent).toMatchObject({
+      normalized_result: {
+        results: [
+          {
+            target_id: "allowed-page",
+            status: "unknown",
+            reload_sent: false,
+            failure_reason: "timeout",
+          },
+        ],
+      },
+    });
+    // Probe-only wake never navigates the stalled page.
+    expect(wakeBrowser.discardedReloadCount()).toBe(0);
+    const revived = await connected.client.callTool({
+      name: "wake_browser_targets",
+      arguments: {
+        cdp_endpoint: wakeBrowser.endpoint,
+        target_ids: ["allowed-page"],
+        probe_deadline_ms: 150,
+        wake_deadline_ms: 2000,
+        revive: "reload",
+      },
+    });
+    expect(revived.isError).not.toBe(true);
+    expect(revived.structuredContent).toMatchObject({
+      normalized_result: {
+        results: [
+          {
+            target_id: "allowed-page",
+            status: "awake_after_reload",
+            reload_sent: true,
+          },
+        ],
+      },
+    });
+    expect(wakeBrowser.discardedReloadCount()).toBe(1);
     const inspected = await connected.client.callTool({
       name: "inspect_web_page",
       arguments: {

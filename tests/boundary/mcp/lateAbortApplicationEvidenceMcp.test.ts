@@ -163,6 +163,9 @@ it("records late-cancelled Browser target Evidence and keeps the server usable",
       if (!options?.signal) throw new Error("MCP did not forward its signal");
       return ok(targetList);
     },
+    wakeTargets: async () => {
+      throw new Error("Unexpected wake call");
+    },
     inspectPage: async () => {
       throw new Error("Unexpected inspect call");
     },
