@@ -188,9 +188,10 @@ The selected provider remains bound to the session until an explicit switch
 or close. Provider failures are returned with their original reason. For an
 `ambiguous` selection error, choose from `details.candidate_ids`; for
 `provider_unavailable`, follow `message`, `remediation.action`, and the original
-reasons in `details.rejections`. For Hopper, Ghidra, IDA, and JADX, run
-`rea doctor --provider ID --json` to diagnose the selected engine. Other adapters,
-such as `pwntools-elf`, report their configuration requirements directly and are
+reasons in `details.rejections`. For Hopper, Ghidra, IDA, JADX, and Kuna, run
+`rea doctor --provider ID --json` to diagnose the selected engine. For Kuna's
+setup requirements, see the [Kuna provider guide](kuna-provider.md). Adapters
+such as `pwntools-elf` report their configuration requirements directly and are
 not accepted by `doctor --provider`. See
 [task readiness](installation.md#check-readiness-for-your-task) and
 [provider selection](mcp-contracts.md#identity-and-discovery).
