@@ -15,33 +15,33 @@ const GRACE_EXPIRED = Symbol("cancellation grace expired");
 
 const hookSnapshotSchema = z.strictObject({
   events: z.array(electronActiveTimelineEventSchema),
-  retention_budget_bytes: z.number().int().min(0),
-  estimated_retained_bytes: z.number().int().min(0),
-  event_serialized_byte_upper_bound: z.number().int().min(0),
-  retained: z.number().int().min(0),
-  dropped: z.number().int().min(0),
-  dropped_ipc: z.number().int().min(0),
-  dropped_runtime: z.number().int().min(0),
+  retention_budget_bytes: z.int().min(0),
+  estimated_retained_bytes: z.int().min(0),
+  event_serialized_byte_upper_bound: z.int().min(0),
+  retained: z.int().min(0),
+  dropped: z.int().min(0),
+  dropped_ipc: z.int().min(0),
+  dropped_runtime: z.int().min(0),
   dropped_event_families: z.array(
     z.strictObject({
       family: z.string().min(1),
-      count: z.number().int().min(1),
+      count: z.int().min(1),
     }),
   ),
   dropped_event_roles: z.array(
     z.strictObject({
       role: z.string().min(1),
-      count: z.number().int().min(1),
+      count: z.int().min(1),
     }),
   ),
-  observed: z.number().int().min(0),
-  observed_ipc: z.number().int().min(0),
-  observed_runtime: z.number().int().min(0),
+  observed: z.int().min(0),
+  observed_ipc: z.int().min(0),
+  observed_runtime: z.int().min(0),
   hook_error: z.boolean(),
 });
 
 const metricSchema = z.strictObject({
-  pid: z.number().int().min(1),
+  pid: z.int().min(1),
   type: z.string().min(1),
   name: z.string().nullable(),
   service_name: z.string().nullable(),

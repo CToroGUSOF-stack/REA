@@ -12,14 +12,14 @@ export const observeWebSessionInputSchema = z.strictObject({
   cdp_endpoint: browserObservationEndpointSchema,
   allowed_origins: browserAllowedOriginsSchema,
   target_id: z.string().trim().min(1),
-  observation_ms: z.number().int().min(1).default(10_000),
+  observation_ms: z.int().min(1).default(10_000),
 });
 export type ObserveWebSessionInput = z.infer<
   typeof observeWebSessionInputSchema
 >;
 
 const timelineEventSchema = z.object({
-  sequence: z.number().int().min(1),
+  sequence: z.int().min(1),
   type: z.enum([
     "navigation_requested",
     "navigation_committed",
@@ -52,7 +52,7 @@ export const webObservationSessionSchema = z.object({
   window: z.object({
     armed_at: z.iso.datetime(),
     ended_at: z.iso.datetime(),
-    requested_ms: z.number().int().min(1),
+    requested_ms: z.int().min(1),
     end_reason: z.enum([
       "window_elapsed",
       "target_left_scope",

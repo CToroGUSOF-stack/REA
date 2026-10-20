@@ -70,7 +70,7 @@ const clientInformation = z
     success: z.literal(true),
     version: z.string().optional(),
     gui_client: z.boolean().optional(),
-    startup_ts: z.number().int().nonnegative().optional(),
+    startup_ts: z.int().nonnegative().optional(),
     message: z.string().nullish(),
   })
   .passthrough();
@@ -83,7 +83,7 @@ const openProject = z
     input_files: z.array(
       z.object({
         file_name: z.string(),
-        file_size: z.number().int().nonnegative(),
+        file_size: z.int().nonnegative(),
         contents_sha256_hash: z.string(),
       }),
     ),

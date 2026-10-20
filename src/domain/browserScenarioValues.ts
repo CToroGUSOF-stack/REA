@@ -98,8 +98,8 @@ export const browserScenarioEnvironmentSchema = z
   .strictObject({
     viewport: z
       .strictObject({
-        width: z.number().int().positive().default(1_280),
-        height: z.number().int().positive().default(720),
+        width: z.int().positive().default(1_280),
+        height: z.int().positive().default(720),
         device_scale_factor: z.number().positive().default(1),
       })
       .default({ width: 1_280, height: 720, device_scale_factor: 1 }),
@@ -166,7 +166,6 @@ const locatorSchema = z.discriminatedUnion("kind", [
 const stepBase = {
   step_id: scenarioIdentifierSchema,
   timeout_ms: z
-    .number()
     .int()
     .min(1)
     .optional()
@@ -187,7 +186,7 @@ export const browserScenarioActionSchema = z.discriminatedUnion("action", [
     action: z.literal("click"),
     locator: locatorSchema,
     button: z.enum(["left", "middle", "right"]).default("left"),
-    click_count: z.number().int().positive().default(1),
+    click_count: z.int().positive().default(1),
   }),
   z.strictObject({
     ...stepBase,
@@ -222,7 +221,6 @@ export const browserScenarioActionSchema = z.discriminatedUnion("action", [
     step_id: scenarioIdentifierSchema,
     action: z.literal("wait_for_timeout"),
     duration_ms: z
-      .number()
       .int()
       .min(1)
       .describe(

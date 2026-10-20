@@ -3,7 +3,7 @@ import { z } from "zod";
 import { localPathStringSchema } from "../localPath.js";
 import { solidityMetadataSchema } from "./solidityMetadata.js";
 
-const byteOffset = z.number().int().nonnegative();
+const byteOffset = z.int().nonnegative();
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
 
 /** Select the carrier representation explicitly; no RPC or deployed-contract lookup is implied. */

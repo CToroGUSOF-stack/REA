@@ -154,7 +154,7 @@ const referenceKind = z
     conditional: z.boolean(),
     terminal: z.boolean(),
     primary: z.boolean(),
-    operand_index: z.number().int(),
+    operand_index: z.int(),
     external: z.boolean(),
   })
   .strict();
@@ -185,8 +185,8 @@ const procedureInfo = z
   .object({
     name: z.string().min(1),
     entrypoint: ghidraCanonicalAddressSchema,
-    basicblock_count: z.number().int().min(0),
-    length: z.number().int().min(0),
+    basicblock_count: z.int().min(0),
+    length: z.int().min(0),
     signature: z.string().nullable(),
     locals: z.array(localVariable),
     classification,
@@ -428,7 +428,7 @@ const functionObservationEnvelope = z.strictObject({
   relationship_coverage: relationshipCoverageSchema.exactOptional(),
   selection: z
     .strictObject({
-      file_offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+      file_offset: z.int().min(0).max(Number.MAX_SAFE_INTEGER),
       mapped_address: ghidraCanonicalAddressSchema,
       procedure_address: ghidraCanonicalAddressSchema,
     })

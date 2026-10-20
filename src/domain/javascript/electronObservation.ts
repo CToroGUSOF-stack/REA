@@ -22,7 +22,7 @@ export type ListElectronTargetsInput = z.infer<
 const inspectElectronPageFacts = {
   ...approvedElectronInput,
   target_id: z.string().trim().min(1),
-  observation_ms: z.number().int().min(0).default(100),
+  observation_ms: z.int().min(0).default(100),
 } as const;
 export const inspectElectronPageInputSchema = z.union([
   z.strictObject({
@@ -56,8 +56,8 @@ export const electronTargetListSchema = z.object({
   browser: browserVersionSchema,
   targets: z.array(electronTargetSchema),
   excluded: z.object({
-    unsupported_url: z.number().int().min(0),
-    non_page: z.number().int().min(0),
+    unsupported_url: z.int().min(0),
+    non_page: z.int().min(0),
   }),
   limitations: z.array(z.string()),
 });
@@ -75,7 +75,7 @@ export const electronPageInspectionSchema = z.object({
   capture_window: z.object({
     started_at: z.iso.datetime(),
     ended_at: z.iso.datetime(),
-    observation_ms: z.number().int().min(0),
+    observation_ms: z.int().min(0),
   }),
   completeness: browserCompletenessSchema,
   frames: z.array(
@@ -86,20 +86,20 @@ export const electronPageInspectionSchema = z.object({
     }),
   ),
   dom: z.object({
-    total_nodes: z.number().int().min(0),
+    total_nodes: z.int().min(0),
     nodes: z.array(
       z.object({
-        index: z.number().int().min(0),
-        parent_index: z.number().int().min(-1),
-        node_type: z.number().int().min(0),
+        index: z.int().min(0),
+        parent_index: z.int().min(-1),
+        node_type: z.int().min(0),
         node_name: z.string(),
-        node_value_length: z.number().int().min(0),
+        node_value_length: z.int().min(0),
         attribute_names: z.array(z.string()),
       }),
     ),
   }),
   scripts: z.object({
-    total: z.number().int().min(0),
+    total: z.int().min(0),
     items: z.array(
       z.object({
         script_key: prefixedDigestSchema("electron_script"),
@@ -110,7 +110,6 @@ export const electronPageInspectionSchema = z.object({
           .nullable()
           .describe("Producer-reported script hash; null when unavailable."),
         length: z
-          .number()
           .int()
           .min(0)
           .nullable()

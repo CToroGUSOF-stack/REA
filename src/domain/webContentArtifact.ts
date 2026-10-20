@@ -6,7 +6,7 @@ import { z } from "zod";
 export const webTextArtifactSchema = z
   .object({
     sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-    bytes: z.number().int().min(0),
+    bytes: z.int().min(0),
     media_type: z.string().min(1),
     charset: z.literal("utf-8"),
     text: z.string(),

@@ -18,4 +18,4 @@ export const providerStartupTimeoutSchema = z
   .string()
   .regex(/^[1-9]\d*$/u, "must be a positive decimal integer")
   .transform(Number)
-  .pipe(z.number().int().min(1).max(MAX_TIMER_DELAY_MS));
+  .pipe(z.int().min(1).max(MAX_TIMER_DELAY_MS));

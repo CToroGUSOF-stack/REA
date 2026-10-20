@@ -30,7 +30,7 @@ export const inspectWebNetworkCaptureInputSchema = z.strictObject({
   ),
   format: z.enum(WEB_NETWORK_CAPTURE_FORMATS),
   record_ordinals: z
-    .array(z.number().int().nonnegative())
+    .array(z.int().nonnegative())
     .min(1)
     .optional()
     .describe(
@@ -85,7 +85,7 @@ const binaryBase = {
 const retainedBinaryDescriptorSchema = z.strictObject({
   ...binaryBase,
   state: z.literal("retained"),
-  bytes: z.number().int().nonnegative(),
+  bytes: z.int().nonnegative(),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
 });
 const redactedBinaryDescriptorSchema = z.strictObject({
@@ -111,7 +111,7 @@ const numberSchema = z.strictObject({
 
 /** Preserve producer representations with independent sidecars rather than invented browser IDs. */
 export const webNetworkCaptureRecordSchema = z.strictObject({
-  ordinal: z.number().int().nonnegative(),
+  ordinal: z.int().nonnegative(),
   location: z.discriminatedUnion("kind", [
     z.strictObject({
       kind: z.literal("unknown"),
@@ -124,8 +124,8 @@ export const webNetworkCaptureRecordSchema = z.strictObject({
     }),
     z.strictObject({
       kind: z.literal("byte-range"),
-      offset: z.number().int().nonnegative(),
-      bytes: z.number().int().positive(),
+      offset: z.int().nonnegative(),
+      bytes: z.int().positive(),
     }),
   ]),
   reported: jsonValueSchema,
@@ -176,7 +176,7 @@ const payloadShape = {
     redactions: z.array(redactionSchema),
     records_pointer: pointerSchema.nullable(),
   }),
-  total_records: z.number().int().nonnegative(),
+  total_records: z.int().nonnegative(),
   records: z.array(webNetworkCaptureRecordSchema),
 };
 const refineCoverage = (
@@ -216,7 +216,7 @@ export const webNetworkCaptureArtifactSchema = z.strictObject({
     .regex(/^[0-9a-f]{64}$/)
     .nullable()
     .describe("Observed SHA-256; null only when explicitly excluded."),
-  bytes: z.number().int().nonnegative(),
+  bytes: z.int().nonnegative(),
 });
 const artifactShape = {
   artifact: webNetworkCaptureArtifactSchema,

@@ -24,12 +24,12 @@ export const hopperMachOImageSchema = z.strictObject({
     z.literal("fat32_thin_slice"),
     z.literal("fat64_thin_slice"),
   ]),
-  architecture_count: z.number().int().min(1).max(128),
+  architecture_count: z.int().min(1).max(128),
   container_table_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-  source_offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-  byte_length: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-  cpu_type: z.number().int().nonnegative(),
-  cpu_subtype: z.number().int().nonnegative(),
+  source_offset: z.int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  byte_length: z.int().positive().max(Number.MAX_SAFE_INTEGER),
+  cpu_type: z.int().nonnegative(),
+  cpu_subtype: z.int().nonnegative(),
 });
 
 export type HopperMachOImage = z.infer<typeof hopperMachOImageSchema>;

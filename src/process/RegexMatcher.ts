@@ -18,7 +18,7 @@ export const REGEX_MATCHING_LIMITATION = `Regex mode uses ECMAScript Unicode sem
 const replySchema = z.discriminatedUnion("status", [
   z.strictObject({
     status: z.literal("matched"),
-    indices: z.array(z.number().int().nonnegative()),
+    indices: z.array(z.int().nonnegative()),
   }),
   z.strictObject({ status: z.literal("invalid_pattern"), reason: z.string() }),
 ]);

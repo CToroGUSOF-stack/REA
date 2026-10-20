@@ -25,8 +25,8 @@ import {
 
 const page = {
   kind: z.literal("interface-builder"),
-  offset: z.number().int().nonnegative().default(0),
-  limit: z.number().int().positive().default(64),
+  offset: z.int().nonnegative().default(0),
+  limit: z.int().positive().default(64),
 } as const;
 
 /** Original decoded rows; graph rows can be narrowed to one decoded document. */
@@ -63,7 +63,7 @@ export const interfaceBuilderViewContextSchema = z.strictObject({
   source_truncated: z.boolean(),
 });
 
-const countsSchema = z.record(z.string(), z.number().int().positive());
+const countsSchema = z.record(z.string(), z.int().positive());
 
 /** Every decoded document with graph counts; rows and evidence stay retained. */
 export const interfaceBuilderSummarySchema = z.strictObject({
@@ -71,15 +71,15 @@ export const interfaceBuilderSummarySchema = z.strictObject({
   provider: interfaceBuilderAnalysisSchema.shape.graph.shape.provider,
   documents: interfaceBuilderAnalysisSchema.shape.documents,
   available_counts: z.strictObject({
-    nodes: z.number().int().nonnegative(),
-    edges: z.number().int().nonnegative(),
-    coverage: z.number().int().nonnegative(),
+    nodes: z.int().nonnegative(),
+    edges: z.int().nonnegative(),
+    coverage: z.int().nonnegative(),
   }),
   node_kinds: countsSchema,
   edge_relations: countsSchema,
   coverage_statuses: countsSchema,
   truncated: z.boolean(),
-  limitation_count: z.number().int().nonnegative(),
+  limitation_count: z.int().nonnegative(),
 });
 
 const tally = (values: readonly string[]): Record<string, number> => {

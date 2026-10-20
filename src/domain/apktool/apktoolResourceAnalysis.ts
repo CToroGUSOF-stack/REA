@@ -142,7 +142,6 @@ export const stringTableSchema = z.strictObject({
     }),
   ),
   total_count: z
-    .number()
     .int()
     .nonnegative()
     .nullable()
@@ -150,7 +149,6 @@ export const stringTableSchema = z.strictObject({
       "Total valid string entries before output limits, or null if the table was not examined or was malformed",
     ),
   unparsed_count: z
-    .number()
     .int()
     .nonnegative()
     .nullable()
@@ -171,7 +169,7 @@ export const apktoolResultSchemas = {
     client,
     target: z.strictObject({
       path: localPathStringSchema,
-      bytes: z.number().int().nonnegative(),
+      bytes: z.int().nonnegative(),
       sha256: digestSchema,
     }),
     metadata: z.strictObject({
@@ -205,7 +203,7 @@ export const apktoolResultSchemas = {
       .describe(
         "Selected table facts, included when locales is supplied or string_tables_only is true",
       ),
-    decoded_file_count: z.number().int().nonnegative(),
+    decoded_file_count: z.int().nonnegative(),
     coverage: z.enum(["complete", "partial"]),
   }),
 } as const;
