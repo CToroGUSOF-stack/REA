@@ -6,7 +6,7 @@ import { err, ok, type Result } from "../domain/result.js";
 
 const common = {
   mode: z.enum(["attached", "headless"]).default("attached"),
-  protocol: z.literal("native").optional(),
+  protocol: z.enum(["native", "hexrays"]).optional(),
   timeoutMs: z.number().int().positive().max(2_147_483_647).default(300_000),
   workspaceRoot: z
     .string()
@@ -44,6 +44,14 @@ const registrationSchema = z
   .refine(
     (config) => config.protocol !== "native" || config.mode === "attached",
     "The native IDA MCP protocol requires attached mode",
+  )
+  // Hex-Rays database leases belong to the MCP server process. Only a stdio
+  // registration gives REA a server, and therefore leases, of its own.
+  .refine(
+    (config) =>
+      config.protocol !== "hexrays" ||
+      (config.mode === "headless" && "command" in config),
+    "The Hex-Rays IDA MCP protocol requires a headless stdio registration",
   );
 
 /** An upstream MCP registration plus REA's database lifecycle selection. */

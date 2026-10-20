@@ -17,6 +17,10 @@ import {
 } from "../filesystem/RegularFile.js";
 import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
+import {
+  hasIdaDatabaseSignature,
+  type AnalysisDatabaseEngine,
+} from "../domain/analysisDatabase.js";
 import { err, ok, type Result } from "../domain/result.js";
 import { readMipsElfMetadata } from "./MipsElfMetadata.js";
 import {
@@ -181,9 +185,13 @@ export const parseBinaryTarget = async (
         targetKind === "database"
           ? undefined
           : await detectArtifactFormat(path, handle, signal);
+      const databaseEngine =
+        targetKind === undefined || targetKind === "database"
+          ? await detectDatabaseEngine(path, handle, signal)
+          : null;
       if (
         targetKind === "database" ||
-        (targetKind === undefined && path.toLowerCase().endsWith(".hop"))
+        (targetKind === undefined && databaseEngine !== null)
       )
         return ok({
           path,
@@ -191,6 +199,7 @@ export const parseBinaryTarget = async (
           sha256: await sha256Handle(handle, path, metadata, signal),
           kind: "database",
           format: "analysis-database",
+          databaseEngine,
         });
       if (artifactFormat !== undefined) {
         const identity = {
@@ -286,6 +295,21 @@ const targetFailureReason = (code: string, detail: string): string => {
 const throwIfTargetResolutionCancelled = (signal?: AbortSignal): void => {
   if (signal?.aborted === true)
     throw new AnalysisCancelledError("resolve_binary_target");
+};
+
+/** IDA databases carry a signature; Hopper databases are known only by suffix. */
+const detectDatabaseEngine = async (
+  path: string,
+  handle: FileHandle,
+  signal?: AbortSignal,
+): Promise<AnalysisDatabaseEngine | null> => {
+  throwIfTargetResolutionCancelled(signal);
+  const magic = Buffer.alloc(4);
+  const observed = await handle.read(magic, 0, magic.length, 0);
+  throwIfTargetResolutionCancelled(signal);
+  if (hasIdaDatabaseSignature(magic.subarray(0, observed.bytesRead)))
+    return "ida";
+  return path.toLowerCase().endsWith(".hop") ? "hopper" : null;
 };
 
 const detectArtifactFormat = async (

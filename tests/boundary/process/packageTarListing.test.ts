@@ -16,6 +16,7 @@ const bridge = "package/bridge/hopper_bridge.py";
 const members = [
   bridge,
   "package/bridge/cutter/rea_bridge.py",
+  "package/bridge/ida/hexrays_queries.py",
   "package/bridge/ghidra/ReaGhidraBridge.java",
   "package/bridge/ghidra/ReaGhidraBundleActivator.java",
   "package/bridge/ghidra/ReaGhidraExtensions.java",

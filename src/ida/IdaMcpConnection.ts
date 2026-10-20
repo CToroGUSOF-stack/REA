@@ -29,6 +29,9 @@ import {
 } from "../domain/analysisErrorCore.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 
+/** A completed upstream tool reply that reported failure, as opposed to an unreadable or missing reply. */
+export class IdaToolRejection extends AnalysisProtocolError {}
+
 /** Injectable MCP boundary used by the provider and transport conformance tests. */
 export interface IdaMcpConnection {
   connect(): Promise<readonly string[]>;
@@ -87,7 +90,7 @@ const parseIdaJsonText = (text: string): JsonValue => {
 /** Decode Python FastMCP's scalar wrapper without dropping structured dictionaries. */
 export const decodeIdaToolResult = (
   input: unknown,
-  protocol?: "native",
+  protocol?: "native" | "hexrays",
   diagnostic: IdaDiagnosticRedactor = createIdaDiagnosticRedactor(),
 ): JsonValue => {
   const result = toolResultSchema.parse(input);
@@ -96,7 +99,7 @@ export const decodeIdaToolResult = (
   );
   if (result.isError === true) {
     const reason = diagnostic.blocks(blocks);
-    throw new AnalysisProtocolError(
+    throw new IdaToolRejection(
       diagnostic.message("IDA MCP tool failed: ", reason),
       {
         diagnostics: { reason },

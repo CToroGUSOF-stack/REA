@@ -1,3 +1,4 @@
+import type { AnalysisDatabaseEngine } from "./analysisDatabase.js";
 import type { ZipPackageFormat } from "./zipPackageFormat.js";
 
 /** Provider-neutral CPU families detected from headers or explicitly selected raw loads. */
@@ -228,6 +229,8 @@ export type BinaryTarget =
       NonExecutableMetadata & {
         readonly kind: "database";
         readonly format: "analysis-database";
+        /** Engine identified at admission; null when the database is unidentified. */
+        readonly databaseEngine: AnalysisDatabaseEngine | null;
       })
   | (BinaryTargetIdentity &
       NonExecutableMetadata & {

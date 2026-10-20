@@ -3,14 +3,22 @@ import {
   assertFeatureTrace,
   findMappedNonFunction,
 } from "./lib/ida-feature-trace.mjs";
+import { privateIdaInput } from "./lib/ida-private-input.mjs";
 import { requireMcpToolError } from "./lib/mcp-verifier-results.mjs";
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { access, writeFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { access, readdir, writeFile } from "node:fs/promises";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs, promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/client";
@@ -56,6 +64,7 @@ const [
   { readIdaConfiguration },
   { createIdaMcpConnection },
   { idaAddressSchema },
+  { hasIdaDatabaseSignature },
 ] = await Promise.all([
   importBuilt("contracts/toolContracts.js"),
   importBuilt("domain/evidence.js"),
@@ -63,6 +72,7 @@ const [
   importBuilt("ida/IdaConfiguration.js"),
   importBuilt("ida/IdaMcpConnection.js"),
   importBuilt("ida/IdaProtocolValues.js"),
+  importBuilt("domain/analysisDatabase.js"),
 ]);
 const registration = readIdaConfiguration(process.env.REA_IDA_MCP_CONFIG);
 if (!registration.ok) throw registration.error;
@@ -97,6 +107,7 @@ const expectedXref =
     : idaAddressSchema.parse(values["expected-xref"]);
 let phase = "target admission";
 const workspaces = new Set();
+let targetIsDatabase = false;
 const databases = new Set();
 const digest = async () => {
   const hash = createHash("sha256");
@@ -116,11 +127,25 @@ const observe = (input) => {
     evidence.locations.some((location) => location.kind === "artifact-path"),
   );
   if (config.mode === "headless") {
-    assert.notEqual(evidence.raw_result.metadata_before.input_path, target);
-    workspaces.add(dirname(evidence.raw_result.metadata_before.input_path));
+    workspaces.add(
+      dirname(
+        privateIdaInput(
+          evidence.raw_result.metadata_before,
+          target,
+          targetIsDatabase,
+        ),
+      ),
+    );
     for (const observation of evidence.raw_result.observations) {
-      assert.equal(typeof observation.arguments.database, "string");
-      databases.add(observation.arguments.database);
+      // Hex-Rays reads select their lease by instance id through execute_python.
+      const database =
+        config.protocol === "hexrays"
+          ? observation.arguments.instance_id
+          : observation.arguments.database;
+      if (config.protocol === "hexrays")
+        assert.equal(observation.tool, "execute_python");
+      assert.equal(typeof database, "string");
+      databases.add(database);
     }
   }
   report.observations.push(evidence);
@@ -401,12 +426,27 @@ const cleanup = async () => {
         "existing GUI target remains open with the original input identity",
       );
     } else {
-      const inventory = await upstream.call("idb_list", {});
-      assert.ok(
-        inventory.sessions.every(
-          (session) => !databases.has(session.session_id),
-        ),
-      );
+      if (config.protocol === "hexrays") {
+        // Leases are per server process, so a fresh server proves release by
+        // listing no live database inside any REA private workspace.
+        const inventory = await upstream.call("list_databases", {});
+        const inside = (workspace, path) => {
+          const rest = relative(workspace, path);
+          return rest !== "" && !rest.startsWith("..") && !isAbsolute(rest);
+        };
+        assert.ok(
+          inventory.instances.every(({ path }) =>
+            [...workspaces].every((workspace) => !inside(workspace, path)),
+          ),
+        );
+      } else {
+        const inventory = await upstream.call("idb_list", {});
+        assert.ok(
+          inventory.sessions.every(
+            (session) => !databases.has(session.session_id),
+          ),
+        );
+      }
       for (const workspace of workspaces)
         await assert.rejects(access(workspace), { code: "ENOENT" });
       report.checks.push(
@@ -419,10 +459,17 @@ const cleanup = async () => {
 };
 try {
   const before = await digest();
+  for await (const head of createReadStream(target, { end: 3 }))
+    targetIsDatabase = hasIdaDatabaseSignature(head);
+  const siblings = (await readdir(dirname(target))).sort();
   await mcp(await cli());
   await cleanup();
   assert.equal(await digest(), before);
-  report.checks.push("original binary unchanged and never executed");
+  // Engines write databases beside their input; only the private copy may get one.
+  assert.deepEqual((await readdir(dirname(target))).sort(), siblings);
+  report.checks.push(
+    "original binary unchanged, never executed, and no files written beside it",
+  );
   report.passed = true;
 } catch (cause) {
   report.failure = {
