@@ -40,6 +40,7 @@ import {
   analysisViewLayoutFixture,
   analysisViewCaptureFixture,
   analysisViewCaptureEvidence,
+  analysisViewResponseCoverageFixture,
   analysisViewObjectDenseCapture,
   analysisViewNativeEvidence,
   environmentManifestCaptureFixture,
@@ -77,6 +78,67 @@ const connect = async (
   await client.connect(clientTransport);
   return { client, session };
 };
+
+it("advertises response coverage and preserves unknown ordinals through portable and retained MCP", async () => {
+  const { client, session } = await connect();
+  const parent = analysisViewCaptureEvidence(
+    analysisViewResponseCoverageFixture(),
+  );
+  const retained = session.recordEvidence(parent);
+  if (!retained.ok) throw retained.error;
+  const schemas = await advertisedMcpToolSchemas(
+    client,
+    "inspect_analysis_view",
+  );
+  const validateInput = schemas.ajv.compile(schemas.inputSchema);
+  const validateOutput = schemas.ajv.compile(schemas.outputSchema);
+  const outputs = [];
+  for (const source of [
+    { kind: "inline", evidence: parent },
+    { kind: "retained-evidence", evidence_id: parent.evidence_id },
+  ]) {
+    const args = {
+      source,
+      view: {
+        kind: "api-surface",
+        include_response_coverage: true,
+        include_query_parameter_names: true,
+      },
+    };
+    expect(validateInput(args)).toBe(true);
+    const response = await client.callTool({
+      name: "inspect_analysis_view",
+      arguments: args,
+    });
+    expect(response.isError).not.toBe(true);
+    expect(validateOutput(response.structuredContent)).toBe(true);
+    const value = parseEvidence(response.structuredContent).normalized_result;
+    expect(value).toMatchObject({
+      parent_evidence_id: parent.evidence_id,
+      records: { examined: 5, total: 50, excluded: 1 },
+      groups: [
+        {
+          record_ordinals: [42, 3, 19],
+          response_coverage: {
+            unavailable_status_ordinals: [3],
+            unavailable_content_type_ordinals: [19],
+          },
+        },
+        {
+          record_ordinals: [8],
+          response_coverage: {
+            unavailable_status_ordinals: [8],
+            unavailable_content_type_ordinals: [8],
+          },
+        },
+      ],
+    });
+    outputs.push(value);
+    expect(JSON.stringify(value)).not.toContain("private-value");
+  }
+  expect(outputs[0]).toEqual(outputs[1]);
+  expect(session.evidenceById(parent.evidence_id)).toEqual(parent);
+});
 
 it("preserves native relationship coverage through inline and retained MCP views", async () => {
   const { client, session } = await connect();
