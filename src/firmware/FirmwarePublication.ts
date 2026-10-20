@@ -33,7 +33,7 @@ const GAP_CONTINUATIONS: Record<ExtractionGap["kind"], string> = {
   "depth-limited":
     "Rerun extract_firmware with a higher max_depth (up to 10) and a fresh output_directory to descend into this path.",
   "unpublished-entry":
-    "The entry is retained as metadata; only regular files are published, without executable permission bits.",
+    "The entry is retained as metadata; only regular files are published, without executable permission bits. Note that Unblob normalizes absolute symlinks to extraction-relative paths for sandbox safety.",
 };
 
 const UNNAMED_DEPENDENCY_CONTINUATION =
