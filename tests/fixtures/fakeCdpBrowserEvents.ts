@@ -669,6 +669,9 @@ const emitRuntimeEvents = (
             },
           ]
         : []),
+      ...(options.nullConsoleArgument === true
+        ? [{ type: "object", subtype: "null", value: null }]
+        : []),
     ],
     stackTrace: {
       callFrames: [
