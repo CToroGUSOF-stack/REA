@@ -16,7 +16,7 @@ import {
   type GhidraInstallationFileOptions,
 } from "./GhidraInstallationProperties.js";
 import { constants } from "node:fs";
-import { accessSync, realpathSync, statSync } from "node:fs";
+import { accessSync, readlinkSync, realpathSync, statSync } from "node:fs";
 import { delimiter as pathDelimiter, dirname, posix, win32 } from "node:path";
 
 import type { ProviderRejectionCode } from "../contracts/providerSelection.js";
@@ -1000,6 +1000,48 @@ export const systemGhidraInstallationHost = (): GhidraInstallationHost => ({
   discoverInstallDirOnPath: discoverGhidraInstallationOnPath,
 });
 
+/**
+ * Keep a stable launcher spelling when it provably resolves to the validated
+ * root, so a package-manager `opt` prefix survives keg upgrades and cleanup
+ * that delete the versioned real target. An unprovable alias is not published.
+ */
+const stableInstallRoot = (
+  launcherPath: string,
+  root: string,
+  path: typeof posix,
+): string | undefined => {
+  let target: string;
+  try {
+    target = readlinkSync(launcherPath);
+  } catch (cause: unknown) {
+    void cause;
+    return undefined;
+  }
+  // A relative target resolves against the physical directory that contains
+  // the launcher, so a PATH entry that is itself a symlink still resolves. The
+  // lexical spelling is tried first because it keeps a stable ancestor alias
+  // (`current -> releases/12.1.4`) as the published path.
+  const declaredCandidates = [
+    dirname(path.resolve(dirname(launcherPath), target)),
+  ];
+  try {
+    declaredCandidates.push(
+      dirname(path.resolve(realpathSync(dirname(launcherPath)), target)),
+    );
+  } catch (cause: unknown) {
+    void cause;
+  }
+  for (const declared of declaredCandidates) {
+    if (declared === root) return undefined;
+    try {
+      if (realpathSync(declared) === root) return declared;
+    } catch (cause: unknown) {
+      void cause;
+    }
+  }
+  return undefined;
+};
+
 /** Find a PATH launcher whose real target is inside a complete Ghidra tree. */
 export const discoverGhidraInstallationOnPath = (
   environment: Readonly<NodeJS.ProcessEnv>,
@@ -1016,9 +1058,10 @@ export const discoverGhidraInstallationOnPath = (
   for (const directory of pathValue.split(pathDelimiter)) {
     if (directory.length === 0) continue;
     for (const launcher of launchers) {
+      let candidate: string;
       let resolved: string;
       try {
-        const candidate = path.resolve(directory, launcher);
+        candidate = path.resolve(directory, launcher);
         if (!executablePath(candidate)) continue;
         resolved = realpathSync(candidate);
       } catch (cause: unknown) {
@@ -1034,7 +1077,7 @@ export const discoverGhidraInstallationOnPath = (
       );
       try {
         if (statSync(properties).isFile() && executablePath(headless))
-          return root;
+          return stableInstallRoot(candidate, root, path) ?? root;
       } catch (cause: unknown) {
         void cause;
       }
