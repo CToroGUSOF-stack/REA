@@ -133,6 +133,7 @@ export const SCOPES = {
     "src/cli/interactiveSetup.ts",
     "src/cli/setupCommands.ts",
     "tests/boundary/filesystem/binaryTarget.test.ts",
+    "tests/boundary/filesystem/windowsTargetSeparators.test.ts",
     "tests/boundary/filesystem/safeOutputTree.test.ts",
     "tests/boundary/providers/native/artifactProvider.archiveSafety.test.ts",
     "tests/boundary/providers/native/artifactProvider.extractionCompleteness.test.ts",
