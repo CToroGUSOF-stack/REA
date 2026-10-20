@@ -1537,6 +1537,54 @@ describe("managed data purge root validation", () => {
   });
 });
 
+describe("uninstall launcher ownership controls", () => {
+  it.each(["json", "toml"] as const)(
+    "retains an unrelated absolute rea launcher byte-for-byte in %s configuration",
+    async (format) => {
+      const home = await createTestTempDirectory("rea-foreign-launcher-");
+      roots.push(home);
+      const name = format === "json" ? "cursor" : "codex";
+      const configPath = join(
+        home,
+        format === "json" ? ".cursor/mcp.json" : ".codex/config.toml",
+      );
+      const foreignCommand = join(
+        home,
+        "unrelated app",
+        PRODUCT_IDENTITY.cliBinary,
+      );
+      await mkdir(dirname(foreignCommand), { recursive: true });
+      await writeFile(foreignCommand, "unrelated application, never executed");
+      await mkdir(dirname(configPath), { recursive: true });
+      const original =
+        format === "json"
+          ? JSON.stringify(
+              {
+                mcpServers: {
+                  rea: { command: foreignCommand, args: ["mcp"] },
+                  other: { command: "other" },
+                },
+              },
+              null,
+              2,
+            ) + "\n"
+          : `# Keep this foreign registration.\n[mcp_servers.rea]\ncommand = ${JSON.stringify(foreignCommand)}\nargs = ["mcp"]\n[mcp_servers.other]\ncommand = "other"\n`;
+      await writeFile(configPath, original);
+      const result = await runUninstall(false, systemUninstallHost(home));
+      expect(result.items).toContainEqual(
+        expect.objectContaining({ name, status: "retained" }),
+      );
+      expect(await readFile(configPath, "utf8")).toBe(original);
+      expect(await readFile(foreignCommand, "utf8")).toBe(
+        "unrelated application, never executed",
+      );
+      await expect(lstat(`${configPath}.rea.backup`)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    },
+  );
+});
+
 describe("client configuration filesystem removal", () => {
   it("uninstalls only owned entries and refuses purge symlinks", async () => {
     const home = await createTestTempDirectory("rea-uninstall-");
@@ -1559,8 +1607,10 @@ describe("client configuration filesystem removal", () => {
     );
     await writeFile(skill, ownedSkillManifest);
     await mkdir(join(home, ".rea"), { recursive: true });
-    await import("node:fs/promises").then(({ symlink }) =>
-      symlink(home, join(home, ".rea/cache")),
+    await symlink(
+      home,
+      join(home, ".rea/cache"),
+      process.platform === "win32" ? "junction" : "dir",
     );
     const first = await runUninstall(true, systemUninstallHost(home));
     expect(first.status).toBe("complete");
