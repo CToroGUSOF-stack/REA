@@ -157,6 +157,24 @@ it("does not alias nested call arguments to an outer assigned result", () => {
   ).toBe(false);
 });
 
+it("keeps an overflowing timer delay unknown without losing the file's graph", () => {
+  const graph = graphFor(`
+      export function greet() { return "hello"; }
+      setTimeout(() => {}, 1e999);
+    `);
+
+  expect(
+    graph.nodes
+      .filter(({ kind }) => kind === "timer")
+      .map(({ properties }) => properties),
+  ).toEqual([{ delay_milliseconds: null, method: "setTimeout" }]);
+  expect(
+    graph.nodes.some(
+      ({ kind, label }) => kind === "function" && label === "greet",
+    ),
+  ).toBe(true);
+});
+
 it("projects config precedence, request fields, and boundaries", () => {
   const graph = graphFor(`
       import { readFileSync } from "node:fs";
