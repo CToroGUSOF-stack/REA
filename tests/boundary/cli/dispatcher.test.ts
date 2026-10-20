@@ -72,7 +72,7 @@ describe("executable dispatcher", () => {
         ),
         workspace.write(
           "dist/cli-runtime/mcpDoctor.js",
-          'export const runProductionMcpDoctorCli = (args) => Promise.resolve({ output: JSON.stringify({ adapter: "mcp-doctor", args }), exitCode: 0 });\n',
+          'export const runProductionMcpDoctorCli = (args, input) => Promise.resolve({ output: JSON.stringify({ adapter: "mcp-doctor", args, stdoutIsTerminal: input.stdoutIsTerminal }), exitCode: 0 });\n',
         ),
       ]);
 
@@ -91,6 +91,7 @@ describe("executable dispatcher", () => {
       await expect(invoke(["mcp", "doctor", "--json"])).resolves.toEqual({
         adapter: "mcp-doctor",
         args: ["--json"],
+        stdoutIsTerminal: false,
       });
       await expect(invoke(["mcp", "add"])).resolves.toEqual({
         adapter: "cli",
@@ -113,6 +114,7 @@ describe("executable dispatcher", () => {
       await expect(invoke(["mcp", "doctor", "--http"])).resolves.toEqual({
         adapter: "mcp-doctor",
         args: ["--http"],
+        stdoutIsTerminal: false,
       });
       await expect(invoke(["mcp", "add", "--http"])).resolves.toEqual({
         adapter: "cli",
