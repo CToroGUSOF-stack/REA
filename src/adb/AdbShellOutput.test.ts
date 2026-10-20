@@ -191,6 +191,22 @@ describe("parseDumpsysPackageOutput", () => {
     ).toBe(0);
   });
 
+  it("reads the application id from the appId line printed by newer builds", () => {
+    expect(
+      parseDumpsysPackageOutput(
+        "Packages:\n  Package [com.example] (abcdef):\n    appId=10234\n",
+      ).userId,
+    ).toBe(10234);
+  });
+
+  it("keeps the package's own id rather than a later shared-user id", () => {
+    expect(
+      parseDumpsysPackageOutput(
+        "Packages:\n  Package [com.example] (abcdef):\n    appId=10234\n\nShared users:\n  SharedUser [android.uid.system] (430d3fb):\n    appId=1000\n",
+      ).userId,
+    ).toBe(10234);
+  });
+
   it("counts listed permissions when the section is available", () => {
     expect(
       parseDumpsysPackageOutput(

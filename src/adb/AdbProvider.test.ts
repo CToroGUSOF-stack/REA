@@ -784,6 +784,26 @@ it("projects package details from dumpsys package output", async () => {
   });
 });
 
+// Newer builds (observed on Android 16) print `appId=` where earlier builds print `userId=`.
+it("projects the application id from Android 16 dumpsys package output", async () => {
+  const { binary } = await writeAdbStub(
+    shellStub({
+      "dumpsys:package": `Packages:
+  Package [com.example] (abcdef):
+    appId=10234
+    pkg=Package{abcdef com.example}
+    versionCode=45 minSdk=24 targetSdk=36
+    versionName=1.2.3
+`,
+    }),
+  );
+  const result = await evidenceResult(providerOver(binary), {
+    operation: "inspect_adb_package",
+    input: { serial: "emulator-5554", package: "com.example" },
+  });
+  expect(result).toMatchObject({ version_name: "1.2.3", user_id: 10234 });
+});
+
 // PackageInfo.getLongVersionCode() combines versionCodeMajor and versionCode
 // into a signed 64-bit long, which JSON numbers cannot hold exactly.
 it.each(["9007199254740993", "-4294967296"])(

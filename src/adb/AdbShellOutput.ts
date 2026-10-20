@@ -337,7 +337,8 @@ export const parseDumpsysPackageOutput = (
       details.installerPackageName === null
     )
       details.installerPackageName = value === "" ? null : value;
-    else if (key === "userId" && details.userId === null) {
+    // Newer builds (observed on Android 16) print `appId=` where earlier builds print `userId=`.
+    else if ((key === "userId" || key === "appId") && details.userId === null) {
       const parsed = /^(\d+)/u.exec(value);
       if (parsed !== null) details.userId = Number(parsed[1]!);
     } else if (key === "pkgFlags" && details.pkgFlags === null)
