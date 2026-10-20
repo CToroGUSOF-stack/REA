@@ -810,6 +810,37 @@ These operation markers do not measure analysis work completed or extend the
 client's deadline. Each new provider session still imports the target into a
 fresh temporary project.
 
+### Connection loss
+
+The close/reopen flow above needs the same connection. A stdio server shuts
+down when its input closes: it closes the provider and the open target, and
+retained session records end with that process. A client that reconnects
+starts a new server process without a target. Its `binary_session` reports
+`open: false` with a different `server_identity.server.started_at`, and target
+queries return `target_unavailable`. Record `started_at` when opening a target,
+then compare it after a connection failure: a changed value means the server
+restarted, not that the target was closed on the same connection. A call that
+was in flight when the connection failed returns no result from the old
+process, so do not treat it as completed.
+
+To recover, call `open_binary` with the same caller-selected path and retry the
+query. The new session imports the target into a fresh project, so the cold
+import and analysis cost is paid again. To keep retained records, export them
+with `export_evidence_bundle` before a long first query, then use
+`import_evidence_bundle` in the new session. A client with an idle timeout can
+keep a long first query from being cancelled by supplying a progress token and
+resetting its timeout on progress, as described above.
+
+One Linux x64 stdio run with Ghidra 12.1.4, JDK 21 and Node 24.18.0 covered this
+on the 192-byte DOS MZ conformance fixture. After a completed overview, closing
+the client input stopped the server, its Ghidra JVM and helper processes, and
+left the owned runtime directory empty. The relaunched server reported
+`open: false`, a new `started_at` and `target_unavailable`. Reopening completed
+a cold overview in about 8 seconds. When the server process was killed with
+SIGKILL instead, the JVM and helpers also exited, but the owned `rea-ghidra-*`
+runtime directory remained under the server's `TMPDIR`. macOS, Windows and
+larger targets were not covered.
+
 REA cleans only resources it owns and never switches to another provider
 automatically. A provider timeout, installation failure, or host permission
 denial needs its own reported recovery; increasing a client deadline alone does
