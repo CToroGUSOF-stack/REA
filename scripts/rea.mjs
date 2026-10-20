@@ -25,6 +25,8 @@ const isMcpHttpMode =
 const SIGPIPE_EXIT_STATUS = 141;
 // Set once the reader of CLI output has closed the pipe.
 let stdoutClosed = false;
+let pendingStdoutWrites = 0;
+let requestedExitCode;
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 // Windows home lookup throws for an empty USERPROFILE. Dependencies resolve
@@ -114,8 +116,13 @@ if (!(await compiledRuntimeExists(runtimeFiles))) {
           if (output.length > 0) wroteOutput = true;
           writeStdout(output);
         },
-        // A command failure caused by the closed pipe keeps the pipe's status.
-        exit: (code) => process.exit(stdoutClosed ? SIGPIPE_EXIT_STATUS : code),
+        exit: (code) => {
+          // Incur can request an exit immediately after writing a diagnostic.
+          // Wait for those actual writes without probing a reader that may
+          // already have consumed the complete output and closed its pipe.
+          requestedExitCode = code;
+          finishRequestedExit();
+        },
       });
     } catch (cause) {
       if (wroteOutput) throw cause;
@@ -154,7 +161,19 @@ function guardClosedStdout() {
 }
 
 function writeStdout(output) {
-  if (!stdoutClosed) process.stdout.write(output);
+  if (stdoutClosed || output.length === 0) return;
+  pendingStdoutWrites += 1;
+  process.stdout.write(output, (cause) => {
+    pendingStdoutWrites -= 1;
+    if (cause?.code === "EPIPE") stdoutClosed = true;
+    else if (cause) throw cause;
+    finishRequestedExit();
+  });
+}
+
+function finishRequestedExit() {
+  if (requestedExitCode !== undefined && pendingStdoutWrites === 0)
+    process.exit(stdoutClosed ? SIGPIPE_EXIT_STATUS : requestedExitCode);
 }
 
 async function compiledRuntimeExists(paths) {
