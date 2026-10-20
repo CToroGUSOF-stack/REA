@@ -338,6 +338,64 @@ describe("full-output token windows", () => {
     expect(text).toMatch(/nextOffset:?\s*3/);
     expect(text).toContain("ok: false");
   });
+
+  it("renders an exhausted beyond-end offset as a non-reversed empty range", async () => {
+    const chunks: Buffer[] = [];
+    const destination = new Writable({
+      write(chunk: Buffer, _encoding, callback) {
+        chunks.push(chunk);
+        callback();
+      },
+    });
+    const argv = [
+      "inspect-managed-artifact",
+      "missing.dll",
+      "--format",
+      "toon",
+      "--full-output",
+      "--token-offset",
+      "100000",
+    ];
+    const output = createCliResultOutput(argv, destination);
+    if (output === undefined) throw new Error("Missing TOON output surface");
+    const cli = Cli.create("rea-output-test", { sync: false });
+    registerManagedCommands(cli, silentLogger, async () => ({
+      code: "target_unavailable",
+      category: "unavailable",
+      message: "The selected artifact is missing.",
+      retryable: false,
+      remediation: { action: "Check that the path exists." },
+      details: { source: "artifact-open" },
+    }));
+    streamCliCommandResults(cli, output);
+    const previousExitCode = process.exitCode;
+    try {
+      await cli.serve(argv, { stdout: () => undefined });
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = previousExitCode;
+    }
+    const text = Buffer.concat(chunks).toString("utf8");
+    expect(text).toContain("ok: false");
+    const match = text.match(/showing tokens (\d+)–(\d+) of (\d+)/);
+    expect(match).not.toBeNull();
+    const [, start, end, total] = match as unknown as [
+      string,
+      string,
+      string,
+      string,
+    ];
+    // An exhausted window describes an empty range at the end of the
+    // failure text; the displayed start must never exceed its end or total.
+    expect(Number(start)).toBe(Number(total));
+    expect(Number(end)).toBe(Number(total));
+    // The slice itself must be empty: the error renders only the newline
+    // and the truncation notice, with none of the failure text.
+    expect(text).toContain(
+      `error: "\\n[truncated: showing tokens ${total}–${total} of ${total}]"`,
+    );
+    expect(text).not.toMatch(/nextOffset/);
+  });
 });
 
 describe("logger classification handoff", () => {

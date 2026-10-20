@@ -365,10 +365,14 @@ const fullFailureEnvelope = (
   const end = tokenLimit === undefined ? total : offset + tokenLimit;
   if (offset === 0 && end >= total) return { ok: false, error: failure, meta };
   const actualEnd = Math.min(end, total);
+  // Clamp the window start at the producing boundary so an exhausted
+  // offset describes an empty range at the end of the failure text instead
+  // of a reversed range past the total.
+  const actualStart = Math.min(offset, total);
   const nextOffset = actualEnd < total ? actualEnd : undefined;
   return {
     ok: false,
-    error: `${sliceByTokens(formatted, offset, end)}\n[truncated: showing tokens ${offset}–${actualEnd} of ${total}]`,
+    error: `${sliceByTokens(formatted, actualStart, end)}\n[truncated: showing tokens ${actualStart}–${actualEnd} of ${total}]`,
     meta: { ...meta, ...(nextOffset === undefined ? {} : { nextOffset }) },
   };
 };
