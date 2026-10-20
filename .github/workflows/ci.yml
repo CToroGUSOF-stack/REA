@@ -324,6 +324,10 @@ jobs:
         with:
           save: ${{ github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
       - run: npm run test:prepare
+      # test:prepare builds the runtime consumed by the verifier regressions.
+      # These Node tests are outside Vitest; real Electron stays opt-in.
+      - name: Run isolated Electron experiment tests
+        run: node --test experiments/electron-feature-path/*.test.mjs
       - name: Find available trusted full-suite timing history
         id: history
         continue-on-error: true

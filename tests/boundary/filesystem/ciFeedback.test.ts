@@ -73,6 +73,60 @@ const evaluateCondition = (
       ),
     );
 
+it("runs every isolated Electron Node test after runtime preparation and gates failures", async () => {
+  const jobs = await workflow();
+  const steps = jobs.build?.steps ?? [];
+  const preparation = steps.findIndex(
+    (step) => step.run === "npm run test:prepare",
+  );
+  const experiment = steps.findIndex(
+    (step) =>
+      step.run === "node --test experiments/electron-feature-path/*.test.mjs",
+  );
+  expect(preparation).toBeGreaterThanOrEqual(0);
+  expect(experiment).toBeGreaterThan(preparation);
+  expect(steps[experiment]?.if).toBeUndefined();
+  expect(steps[experiment]?.["continue-on-error"]).toBeUndefined();
+  expect(jobs.required?.needs).toContain("build");
+
+  const flags = await scopeFlags();
+  const context = Object.fromEntries(
+    Object.keys(jobs).map((name) => [name, { result: "success" }]),
+  );
+  const changes = {
+    result: "success",
+    outputs: {
+      ...Object.fromEntries(flags.map((flag) => [flag, "false"])),
+      tier: "fast",
+      code: "true",
+    },
+  };
+  for (const result of ["failure", "cancelled", "skipped", "missing"]) {
+    const needs = { ...context, changes, build: { result } };
+    if (result === "missing") Reflect.deleteProperty(needs, "build");
+    await expect(
+      execute(
+        process.execPath,
+        [
+          fileURLToPath(
+            new URL("../../../scripts/ci/required.mjs", import.meta.url),
+          ),
+        ],
+        {
+          env: {
+            ...process.env,
+            CI_JOBS: JSON.stringify(needs),
+            CI_QUALIFICATION_DIRECTORY: "",
+          },
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining("build"),
+    });
+  }
+});
+
 it.each(["fast", "full"] as const)(
   "requires coverage and both actual mutation preflights in %s qualification",
   async (tier) => {
