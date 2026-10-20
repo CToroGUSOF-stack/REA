@@ -40,7 +40,7 @@ or establish one end-to-end deadline across a whole CLI or MCP operation. A
 request that reaches its budget returns a typed timeout, while caller
 cancellation remains a cancellation.
 
-Earlier verification used JEB 5.48.0 (Linux x64, licensed build) serving `jeb-mcp-server` 1.3.0 over streamable HTTP. The official Linux x64 CE build `5.48.0.202610071539` was also verified through real CLI and production stdio MCP native-code workflows; see the [Linux CE audit](../experiments/analysis-efficiency/jeb-linux-native.md) for measurements and limits. CE verification does not establish licensed/Demo Android decompilation or GUI behavior.
+Earlier verification used JEB 5.48.0 (Linux x64, licensed build) serving `jeb-mcp-server` 1.3.0 over streamable HTTP. The official Linux x64 CE build `5.48.0.202610071539` was also verified through real CLI and production stdio MCP native-code workflows; see the [Linux CE audit](https://github.com/morluto/rea/blob/main/experiments/analysis-efficiency/jeb-linux-native.md) for measurements and limits. CE verification does not establish licensed/Demo Android decompilation or GUI behavior.
 
 ## Operations
 
