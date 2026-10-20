@@ -50,6 +50,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 
 import ghidra.app.util.headless.HeadlessScript;
 import ghidra.app.decompiler.DecompInterface;
@@ -2316,6 +2317,10 @@ public final class ReaGhidraBridge extends HeadlessScript {
 
         JsonArray parameters = new JsonArray();
         result.add("parameters", parameters);
+
+        // hasVarArgs() is false by default; only imported (e.g. DWARF) or user signatures assert arity.
+        boolean varargsKnown = "imported".equals(signatureSource) || "user_defined".equals(signatureSource);
+        result.add("varargs", varargsKnown ? new JsonPrimitive(function.hasVarArgs()) : JsonNull.INSTANCE);
 
         JsonArray jumpTables = new JsonArray();
         result.add("jump_tables", jumpTables);
