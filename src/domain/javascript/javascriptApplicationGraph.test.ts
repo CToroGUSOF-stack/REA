@@ -815,17 +815,28 @@ describe("JavaScript Application Graph: identity strategy requirements", () => {
     );
   });
 
-  it("prevents static authorities from claiming runtime locations", () => {
-    const evidence = artifactEvidence(
-      APPLICATION_GRAPH_DIGESTS.asar,
-      "dist/module.js",
-      "ast-static-analysis",
-    );
-    evidence.location = runtimeEvidence("script-module").location;
-    expect(() => graphForNode(contentNode(evidence))).toThrow(
-      /cannot claim a runtime location/u,
-    );
-  });
+  // Mirrors the static authority list the graph validator owns. Every
+  // artifact-backed static authority must reject a runtime location, so a new
+  // member of that list cannot be added without covering it here.
+  it.each([
+    "artifact-bytes",
+    "ast-static-analysis",
+    "managed-static-analysis",
+    "native-analysis-provider",
+  ] as const)(
+    "prevents the %s authority from claiming a runtime location",
+    (authority) => {
+      const evidence = artifactEvidence(
+        APPLICATION_GRAPH_DIGESTS.asar,
+        "dist/module.js",
+        authority,
+      );
+      evidence.location = runtimeEvidence("script-module").location;
+      expect(() => graphForNode(contentNode(evidence))).toThrow(
+        /cannot claim a runtime location/u,
+      );
+    },
+  );
 
   it("enforces epistemic truthfulness and content-addressed artifacts", () => {
     const inferredAsObserved = inferredArtifactEvidence(
