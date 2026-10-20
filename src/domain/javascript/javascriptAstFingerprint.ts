@@ -38,23 +38,43 @@ export const collectJavaScriptExports = (
   bindings?: JavaScriptSemanticAnalysisState,
 ): StaticExports => {
   const exports = new Set<string>();
-  const parameter = t.isFunction(node)
-    ? runtimeFunctionParameters(node)[1]
-    : undefined;
-  const factoryExports =
-    bindings !== undefined && t.isFunction(node) && t.isIdentifier(parameter)
-      ? resolveSemanticBindingState(bindings, parameter, parameter.name)
-          ?.bindingId
-      : undefined;
-  const isExportsAlias = (reference: t.Node | null): boolean => {
+  const parameters = t.isFunction(node) ? runtimeFunctionParameters(node) : [];
+  const factoryBindings = parameters
+    .slice(0, 2)
+    .map((parameter) =>
+      t.isAssignmentPattern(parameter) ? parameter.left : parameter,
+    )
+    .map((parameter) =>
+      bindings !== undefined && t.isIdentifier(parameter)
+        ? resolveSemanticBindingState(bindings, parameter, parameter.name)
+            ?.bindingId
+        : undefined,
+    );
+  // recoverBundlerModule supplies binding state for positional module/exports
+  // slots. An unresolved factory binding must stay unmatched to exclude shadows.
+  // Syntax-only callers without binding state (or non-factory nodes) retain
+  // the conventional literal names instead.
+  const isParameter = (reference: t.Node | null, index: 0 | 1): boolean => {
     if (!t.isIdentifier(reference)) return false;
-    if (factoryExports === undefined) return reference.name === "exports";
+    if (bindings === undefined || !t.isFunction(node))
+      return reference.name === (index === 0 ? "module" : "exports");
+    const bindingId = factoryBindings[index];
     return (
-      bindings !== undefined &&
+      bindingId !== undefined &&
       resolveSemanticBindingState(bindings, reference, reference.name)
-        ?.bindingId === factoryExports
+        ?.bindingId === bindingId
     );
   };
+  // One receiver interpretation serves assignments and declaration calls alike.
+  const exportOffset = (
+    root: t.Node | null,
+    path: readonly string[],
+  ): number | null =>
+    isParameter(root, 1)
+      ? 1
+      : isParameter(root, 0) && path[1] === "exports"
+        ? 2
+        : null;
   traverseJavaScriptAst(node, {
     enter: (current) => {
       if (t.isAssignmentExpression(current))
@@ -62,10 +82,10 @@ export const collectJavaScriptExports = (
           current.left,
           current.right,
           exports,
-          isExportsAlias,
+          exportOffset,
         );
       if (t.isCallExpression(current))
-        collectCallExports(current, exports, isExportsAlias);
+        collectCallExports(current, exports, exportOffset);
       return undefined;
     },
   });
@@ -140,21 +160,15 @@ const collectAssignmentExports = (
   left: t.LVal | t.OptionalMemberExpression,
   right: t.Expression,
   output: Set<string>,
-  isExportsAlias: (root: t.Node | null) => boolean,
+  exportOffset: (root: t.Node | null, path: readonly string[]) => number | null,
 ): void => {
   const path = memberPath(left);
   if (path === null) return;
   const root = memberRoot(left);
-  const exportsAlias = isExportsAlias(root);
+  const offset = exportOffset(root, path);
   // Rebinding the CommonJS alias does not replace module.exports.
-  if (path.length === 1 && exportsAlias) return;
-  const exportOffset = exportsAlias
-    ? 1
-    : path[0] === "module" && path[1] === "exports"
-      ? 2
-      : null;
-  if (exportOffset === null) return;
-  if (path.length === exportOffset) {
+  if (offset === null || (path.length === 1 && offset === 1)) return;
+  if (path.length === offset) {
     if (t.isObjectExpression(right)) collectObjectKeys(right, output);
     else addExport(output, "default");
     return;
@@ -162,13 +176,13 @@ const collectAssignmentExports = (
   // A CommonJS export assignment exposes the first property below the
   // exports object. Deeper writes mutate that exported value, rather than
   // creating an export whose name is the dotted member path.
-  addExport(output, path[exportOffset]!);
+  addExport(output, path[offset]!);
 };
 
 const collectCallExports = (
   call: t.CallExpression,
   output: Set<string>,
-  isExportsAlias: (root: t.Node | null) => boolean,
+  exportOffset: (root: t.Node | null, path: readonly string[]) => number | null,
 ): void => {
   const callee = memberPath(call.callee);
   if (callee === null) return;
@@ -181,11 +195,8 @@ const collectCallExports = (
   const targetNode = call.arguments[0];
   const target = memberPath(targetNode);
   const exportTarget =
-    isExportsAlias(targetNode ?? null) ||
-    (target !== null &&
-      target.length === 2 &&
-      target[0] === "module" &&
-      target[1] === "exports");
+    target !== null &&
+    exportOffset(memberRoot(targetNode), target) === target.length;
   if (!exportTarget) return;
   if (definePropertyCall) {
     const name = stringValue(call.arguments[1]);
