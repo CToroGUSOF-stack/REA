@@ -4,6 +4,7 @@ import { localPathStringSchema } from "../localPath.js";
 
 const uint = z.number().int().min(0).max(0xffffffff);
 const range = z.strictObject({ offset: uint, bytes: uint });
+const payloadStatus = z.enum(["decoded", "malformed"]);
 const identity = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("id"), id: uint }),
   z.strictObject({
@@ -47,7 +48,7 @@ export const inspectPeResourcesInputSchema = z.strictObject({
     ),
 });
 
-/** Original file/RVA locations and resource identities; icon edges are static relationships. */
+/** Original file/RVA locations and resource identities; icon edges are static relationships, and string and version payloads are decoded statically. */
 export const peResourcesSchema = z.strictObject({
   artifact: z.strictObject({
     path: z.string().min(1),
@@ -110,6 +111,66 @@ export const peResourcesSchema = z.strictObject({
           size_matches: z.boolean().nullable(),
         }),
       ),
+    }),
+  ),
+  // Decoded RT_STRING and RT_VERSION payloads. A payload that breaks its
+  // documented layout is reported as malformed with a reason, not decoded in
+  // part, and the resource inventory still succeeds.
+  string_tables: z.array(
+    z.strictObject({
+      resource_index: uint,
+      status: payloadStatus,
+      block_id: uint.nullable(),
+      first_string_id: uint.nullable(),
+      strings: z.array(
+        z.strictObject({ id: uint, value: z.string(), location: range }),
+      ),
+      trailing_bytes: uint.nullable(),
+      reason: z.string().nullable(),
+    }),
+  ),
+  version_infos: z.array(
+    z.strictObject({
+      resource_index: uint,
+      status: payloadStatus,
+      fixed_file_info: z
+        .strictObject({
+          location: range,
+          struct_version: uint,
+          file_version: z.string(),
+          product_version: z.string(),
+          file_version_ms: uint,
+          file_version_ls: uint,
+          product_version_ms: uint,
+          product_version_ls: uint,
+          file_flags_mask: uint,
+          file_flags: uint,
+          file_os: uint,
+          file_type: uint,
+          file_subtype: uint,
+          file_date_ms: uint,
+          file_date_ls: uint,
+        })
+        .nullable(),
+      string_file_info: z.array(
+        z.strictObject({
+          key: z.string(),
+          language: uint.nullable(),
+          code_page: uint.nullable(),
+          location: range,
+          strings: z.array(
+            z.strictObject({
+              key: z.string(),
+              value: z.string().nullable(),
+              location: range,
+            }),
+          ),
+        }),
+      ),
+      translations: z.array(
+        z.strictObject({ language: uint, code_page: uint, location: range }),
+      ),
+      reason: z.string().nullable(),
     }),
   ),
   coverage: z.strictObject({

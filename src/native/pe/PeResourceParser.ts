@@ -14,6 +14,7 @@ import {
   readPeResourceLayout,
   requirePeRange,
 } from "./PeResourceLayout.js";
+import { readStringTables, readVersionInfos } from "./PeResourcePayloads.js";
 
 type Range = { offset: number; bytes: number };
 type OccupiedRange = Range & {
@@ -35,7 +36,7 @@ const jsonBytes = (value: unknown, maximum: number): number => {
 const identityKey = (id: PeResourceIdentity): string =>
   id.kind === "id" ? `id:${String(id.id)}` : `name:${id.utf16le_hex}`;
 
-/** Decode the conventional type/name/language tree; never infer payload meaning or runtime loading. */
+/** Decode the conventional type/name/language tree; payloads are decoded only for documented static formats, never runtime loading. */
 export const parsePeResources = async (
   bytes: Buffer,
   artifact: PeResources["artifact"],
@@ -227,6 +228,18 @@ export const parsePeResources = async (
     resource.payload.sha256 = digest;
   }
   const iconGroups = readIconGroups(bytes, resources, account, ensureCapacity);
+  const stringTables = readStringTables(
+    bytes,
+    resources,
+    account,
+    ensureCapacity,
+  );
+  const versionInfos = readVersionInfos(
+    bytes,
+    resources,
+    account,
+    ensureCapacity,
+  );
   const report: PeResources = {
     artifact,
     format: layout.format,
@@ -242,13 +255,16 @@ export const parsePeResources = async (
     directories,
     resources,
     icon_groups: iconGroups,
+    string_tables: stringTables,
+    version_infos: versionInfos,
     coverage: {
       status: "complete",
       examined_entries: examined,
       resources: resources.length,
     },
     limitations: [
-      "Static PE32/PE32+ type/name/language resource inventory; payloads other than RT_GROUP_ICON remain opaque.",
+      "Static PE32/PE32+ type/name/language resource inventory; payloads other than RT_GROUP_ICON, RT_STRING and RT_VERSION remain opaque.",
+      "String table and version payloads are decoded from their bytes; LoadString and VerQueryValue language fallback is not observed. A payload that breaks its documented layout is reported as malformed with a reason and no decoded values.",
       "Icon candidates are resource-table relationships. Language fallback, image decoding and actual shell/window loading are not observed.",
       "Exact shared byte ranges are retained; non-identical overlapping resource structures or payloads are rejected.",
     ],

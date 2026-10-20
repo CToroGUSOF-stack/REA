@@ -30,6 +30,8 @@ it.each([
   "outside-range",
   "wrong-coverage",
   "bad-icon-reference",
+  "bad-string-location",
+  "bad-version-location",
 ])(
   "rejects invalid provider output before creating Evidence: %s",
   async (problem) => {
@@ -40,6 +42,39 @@ it.each([
     if (problem === "wrong-coverage") report.coverage.resources = 99;
     if (problem === "bad-icon-reference")
       report.icon_groups[0]!.images[0]!.candidate_resource_indices = [999];
+    if (problem === "bad-string-location") {
+      report.resources.push({
+        ...report.resources[0]!,
+        index: report.resources.length,
+        type: { kind: "id", id: 6 },
+      });
+      report.coverage.resources = report.resources.length;
+      report.string_tables.push({
+        resource_index: report.resources.length - 1,
+        status: "decoded",
+        block_id: 1,
+        first_string_id: 0,
+        strings: [],
+        trailing_bytes: 0,
+        reason: null,
+      });
+    }
+    if (problem === "bad-version-location") {
+      report.resources.push({
+        ...report.resources[0]!,
+        index: report.resources.length,
+        type: { kind: "id", id: 16 },
+      });
+      report.coverage.resources = report.resources.length;
+      report.version_infos.push({
+        resource_index: report.resources.length,
+        status: "malformed",
+        fixed_file_info: null,
+        string_file_info: [],
+        translations: [],
+        reason: "malformed",
+      });
+    }
     const service = new PeResourcesService({
       identity: PE_RESOURCES_PROVIDER,
       inspect: () => Promise.resolve(ok(report)),

@@ -200,12 +200,30 @@ remain explicit. Encoded dimensions are preserved (zero denotes 256 pixels).
 This is static reference inspection; no image decoding, language fallback,
 resource loading or selected-file execution occurs.
 
+`string_tables` expands each RT_STRING block into its sixteen counted UTF-16LE
+strings. Block N holds string IDs (N - 1) × 16 through (N - 1) × 16 + 15. Empty
+slots are kept, each string carries its file location, and `trailing_bytes`
+counts any padding after the sixteenth string.
+
+`version_infos` decodes RT_VERSION: `VS_FIXEDFILEINFO` (file and product
+versions as text and as their original words, flags, OS, type, subtype and
+date), every `StringFileInfo` table with its language and code page, and the
+`VarFileInfo` translation list, all with file locations. A text value is read
+up to its terminator inside its own block, because some resource compilers
+count its length in bytes rather than UTF-16 units.
+
+A string or version payload that breaks its documented layout is reported with
+`status: "malformed"` and a `reason`, with no decoded values, while the rest of
+the inventory still succeeds. Both are static decodings: LoadString and
+VerQueryValue language fallback is not observed.
+
 An absent resource data directory is a complete empty inventory. Malformed
 headers, truncated tables, cycles, duplicate sibling identities, unbacked or
 ambiguous RVA mappings, nonidentical overlapping ranges and unsupported tree
 shapes fail explicitly, rather than returning partial inventories. Exact shared
 payload ranges are supported. The supported tree has three levels: type, name,
-and language. Other resource payload formats remain opaque.
+and language. Payload formats other than RT_GROUP_ICON, RT_STRING and RT_VERSION
+remain opaque.
 
 `max_file_bytes` defaults to 64 MiB (maximum 512 MiB); `max_entries` defaults to
 16384, the largest stock Windows resource image measured with headroom

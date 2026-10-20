@@ -161,6 +161,83 @@ const validReport = (
     )
   )
     return false;
+  if (
+    !report.string_tables.every((table) => {
+      const resource = report.resources[table.resource_index];
+      if (
+        resource === undefined ||
+        resource.type.kind !== "id" ||
+        resource.type.id !== 6
+      )
+        return false;
+      const withinPayload = (range: {
+        readonly offset: number;
+        readonly bytes: number;
+      }) =>
+        inside(range) &&
+        range.offset >= resource.payload.location.offset &&
+        range.offset + range.bytes <=
+          resource.payload.location.offset + resource.payload.location.bytes;
+      if (table.status === "malformed")
+        return (
+          table.strings.length === 0 &&
+          table.first_string_id === null &&
+          table.reason !== null
+        );
+      if (
+        table.block_id === null ||
+        table.block_id < 1 ||
+        table.block_id > 4096 ||
+        table.first_string_id !== (table.block_id - 1) * 16 ||
+        table.strings.length !== 16 ||
+        table.reason !== null
+      )
+        return false;
+      return table.strings.every(
+        (string, index) =>
+          string.id === table.first_string_id! + index &&
+          withinPayload(string.location),
+      );
+    }) ||
+    !report.version_infos.every((info) => {
+      const resource = report.resources[info.resource_index];
+      if (
+        resource === undefined ||
+        resource.type.kind !== "id" ||
+        resource.type.id !== 16
+      )
+        return false;
+      const withinPayload = (range: {
+        readonly offset: number;
+        readonly bytes: number;
+      }) =>
+        inside(range) &&
+        range.offset >= resource.payload.location.offset &&
+        range.offset + range.bytes <=
+          resource.payload.location.offset + resource.payload.location.bytes;
+      if (info.status === "malformed")
+        return (
+          info.fixed_file_info === null &&
+          info.string_file_info.length === 0 &&
+          info.translations.length === 0 &&
+          info.reason !== null
+        );
+      return (
+        info.reason === null &&
+        (info.fixed_file_info === null ||
+          withinPayload(info.fixed_file_info.location)) &&
+        info.string_file_info.every(
+          (table) =>
+            withinPayload(table.location) &&
+            table.strings.every((string) => withinPayload(string.location)),
+        ) &&
+        info.translations.every((translation) =>
+          withinPayload(translation.location),
+        )
+      );
+    })
+  )
+    return false;
   return report.icon_groups.every((group) => {
     const resource = report.resources[group.resource_index];
     if (

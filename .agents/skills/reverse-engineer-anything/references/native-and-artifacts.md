@@ -347,8 +347,11 @@ resource inspection without opening a native target. Preserve returned Evidence:
 type/name/language IDs and UTF-16 names, original directory/data/payload ranges,
 code pages, payload hashes and static icon-group references. Same-language icon
 resolution is explicit; missing references and size mismatch remain visible.
-Other payloads are opaque, and this operation does not decode images or simulate
-Windows resource loading. Consult the budgets and supported tree profile in
+RT_STRING blocks expose all sixteen string IDs and their values; RT_VERSION
+exposes fixed file/product versions, StringFileInfo values, and translations
+with source ranges. Other payloads are opaque, and this operation does not
+decode images or simulate Windows resource loading. Consult the budgets and
+supported tree profile in
 [offline binary diagnostics](https://github.com/morluto/rea/blob/main/docs/binary-diagnostics.md).
 
 For exact core-module import/export differences, use `compare_wasm_interfaces`

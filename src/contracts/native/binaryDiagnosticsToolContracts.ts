@@ -30,12 +30,13 @@ export const BINARY_DIAGNOSTICS_TOOL_CONTRACTS = [
     ...toolContractMetadata("inspect_pe_resources"),
     kind: "native-provider",
     description:
-      "Inspect one explicit local PE32/PE32+ image's complete bounded type/name/language resource tree without executing it or opening a disassembler. Returns numeric IDs versus original UTF-16 names, directory/data-entry file locations, payload RVA/file ranges, complete SHA-256 hashes and static RT_GROUP_ICON image-resource candidates. Language fallback, image decoding and actual shell/window loading remain unobserved. Reads a stable regular file; malformed or ambiguous mappings, non-identical overlapping ranges and exhausted budgets return no partial success. Portable on supported Node hosts; no Windows SDK or engine installation required.",
+      "Inspect one explicit local PE32/PE32+ image's complete bounded type/name/language resource tree without executing it or opening a disassembler. Returns numeric IDs versus original UTF-16 names, directory/data-entry file locations, payload RVA/file ranges, complete SHA-256 hashes, static RT_GROUP_ICON image-resource candidates, decoded RT_STRING tables (string IDs, text and locations) and RT_VERSION details (fixed file and product versions, StringFileInfo values such as CompanyName and FileVersion, and translations). A malformed string or version payload is reported with a reason instead of failing the inventory. Language fallback, image decoding and actual shell/window loading remain unobserved. Reads a stable regular file; malformed or ambiguous mappings, non-identical overlapping ranges and exhausted budgets return no partial success. Portable on supported Node hosts; no Windows SDK or engine installation required.",
     inputSchema: inspectPeResourcesInputSchema,
     outputSchema: evidenceResultOf(peResourcesSchema),
     examples: [
       {
-        title: "Inspect PE resource identities and icon relationships",
+        title:
+          "Inspect PE resource identities, icons, strings and version info",
         input: { path: "/artifacts/application.exe" },
       },
     ],
