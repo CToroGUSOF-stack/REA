@@ -177,6 +177,10 @@ export const withSignatureTarget = async (
         new AnalysisCleanupLeaseGroup(failure, [owner.lease]);
         return combineCleanupFailure(result, failure);
       }
+      if (signal?.aborted) {
+        const cancellation = new AnalysisCancelledError("inspect_signature");
+        return combineCleanupFailure(result, cancellation);
+      }
       return result;
     });
   } catch (cause: unknown) {
