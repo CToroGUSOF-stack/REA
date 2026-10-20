@@ -21,6 +21,8 @@ interface ServerContext {
   readonly logger: Logger;
   readonly serverLogger: Logger;
   readonly loadOptionalProviders: () => Promise<OptionalProviderLoadResult>;
+  /** A shutdown request; once aborted, no transport starts. */
+  readonly signal?: AbortSignal;
 }
 
 type ClosableOptionalProvider = {
@@ -37,6 +39,11 @@ export const startMcpTransport = async (
       readonly ok: true;
       readonly handle: McpServerHandle;
       readonly closeAndroid: () => Promise<void>;
+      readonly closeOptionalProviders: () => Promise<void>;
+    }
+  | {
+      readonly ok: false;
+      readonly cancelled: true;
       readonly closeOptionalProviders: () => Promise<void>;
     }
   | { readonly ok: false }
@@ -107,6 +114,10 @@ export const startMcpTransport = async (
     });
     await optionalProviderClose;
   };
+  // A shutdown requested while providers loaded owns their cleanup; starting
+  // a transport now would serve clients after shutdown began.
+  if (serverContext.signal?.aborted === true)
+    return { ok: false, cancelled: true, closeOptionalProviders };
   let handle: McpServerHandle;
   try {
     handle = await dependencies.serve(

@@ -288,7 +288,10 @@ export class BinarySession
   async #openWithinTransition(
     admittedThrough: number,
     resolve: () => Promise<Result<ResolvedSessionOpen, AnalysisError>>,
-    options: Pick<BinarySessionOpenOptions, "signal" | "snapshot">,
+    options: Pick<
+      BinarySessionOpenOptions,
+      "signal" | "snapshot" | "retainProviderDocumentsOnCancel"
+    >,
   ): Promise<Result<BinaryTarget, AnalysisError>> {
     if (this.#externalMutationCleanupFailure?.cleanupIncomplete === true)
       return err(this.#externalMutationCleanupFailure);
@@ -347,7 +350,7 @@ export class BinarySession
     const run: SessionRun = { client, route, runId };
     const started = await client.execute("health", {}, options);
     if (!started.ok) {
-      return err(await this.#failedOpen(run, previous, started.error));
+      return err(await this.#failedOpen(run, previous, started.error, options));
     }
     if (isAborted(options.signal)) {
       return err(
@@ -355,6 +358,7 @@ export class BinarySession
           run,
           previous,
           new AnalysisCancelledError("open_binary"),
+          options,
         ),
       );
     }
@@ -569,8 +573,18 @@ export class BinarySession
     run: SessionRun,
     previous: SessionBinding | undefined,
     primary: AnalysisError,
+    options: Pick<
+      BinarySessionOpenOptions,
+      "signal" | "retainProviderDocumentsOnCancel"
+    > = {},
   ): Promise<AnalysisError> {
-    const closed = await this.#retireClient(run);
+    const closed = await this.#retireClient(
+      run,
+      isAborted(options.signal) &&
+        options.retainProviderDocumentsOnCancel === true
+        ? { retainDocument: true }
+        : {},
+    );
     if (!closed.ok)
       return analysisErrorWithCleanupFailure(
         primary,
