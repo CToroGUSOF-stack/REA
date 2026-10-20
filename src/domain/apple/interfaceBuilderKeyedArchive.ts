@@ -167,6 +167,26 @@ const HIERARCHY_KEY =
  * names the referenced object; the hierarchy walk visits each object once.
  */
 const keyedArchiveTable = (objectTable: readonly unknown[]) => {
+  // Many objects share one descriptor, so each referenced chain is parsed once.
+  const classChains = new Map<number, ReadonlySet<string>>();
+  /** The class and superclass names a class descriptor declares in `$classes`. */
+  const classChain = (classReference: unknown): ReadonlySet<string> => {
+    const uid = archiveUid(classReference);
+    const cached = uid === undefined ? undefined : classChains.get(uid);
+    if (cached !== undefined) return cached;
+    const descriptor = record(
+      uid === undefined ? classReference : objectTable[uid],
+    );
+    const chain = new Set(
+      Array.isArray(descriptor.$classes)
+        ? descriptor.$classes.filter(
+            (name): name is string => typeof name === "string",
+          )
+        : [],
+    );
+    if (uid !== undefined) classChains.set(uid, chain);
+    return chain;
+  };
   const classNameOf = (value: unknown): string | null => {
     const classReference = record(value).$class;
     const uid = archiveUid(classReference);
@@ -294,20 +314,10 @@ const keyedArchiveTable = (objectTable: readonly unknown[]) => {
     return { items: root, omittedReferences };
   };
   const archivedArrayClass = (classReference: unknown): boolean => {
-    const uid = archiveUid(classReference);
-    const descriptor = record(
-      uid === undefined ? classReference : objectTable[uid],
-    );
-    const classNames = Array.isArray(descriptor.$classes)
-      ? descriptor.$classes.filter(
-          (name): name is string => typeof name === "string",
-        )
-      : [];
-    return (
-      classNames.includes("NSArray") || classNames.includes("NSMutableArray")
-    );
+    const classNames = classChain(classReference);
+    return classNames.has("NSArray") || classNames.has("NSMutableArray");
   };
-  return { resolve, hierarchy };
+  return { resolve, hierarchy, classChain };
 };
 
 /** Project class and connection objects from an NSKeyedArchiver object table. */
@@ -317,7 +327,11 @@ const parseKeyedArchive = (
   if (root.$archiver !== "NSKeyedArchiver" || !Array.isArray(root.$objects))
     return null;
   const objectTable: readonly unknown[] = root.$objects;
-  const { resolve, hierarchy: toHierarchy } = keyedArchiveTable(objectTable);
+  const {
+    resolve,
+    hierarchy: toHierarchy,
+    classChain,
+  } = keyedArchiveTable(objectTable);
   const objects: InterfaceBuilderObject[] = [];
   const connections: InterfaceBuilderConnection[] = [];
   let objectCount = 0;
@@ -343,7 +357,7 @@ const parseKeyedArchive = (
       (typeof fields.archiveUID === "number"
         ? String(fields.archiveUID)
         : String(index));
-    const kind = classifyObject(className);
+    const kind = classifyObject(className, classChain(record(raw).$class));
     if (objects.length < 20_000)
       objects.push(
         objectNode.parse({
@@ -486,9 +500,33 @@ const firstObjectReference = (...values: unknown[]): string | null => {
   return null;
 };
 
+/**
+ * Framework base classes whose presence in an archived `$classes` chain settles
+ * an object's kind, most specific first: UIControl and NSControl are views.
+ */
+const archivedKindBases: readonly (readonly [
+  InterfaceBuilderObject["kind"],
+  readonly string[],
+])[] = [
+  [
+    "view_controller",
+    ["UIViewController", "NSViewController", "NSWindowController"],
+  ],
+  ["control", ["UIControl", "NSControl"]],
+  ["view", ["UIView", "NSView", "UIWindow", "NSWindow"]],
+];
+
+/**
+ * Classify an object by its declared superclass chain when the archive records
+ * one, otherwise by its class name alone. Names are only a heuristic:
+ * `UINavigationController` names no view controller and contains "control".
+ */
 const classifyObject = (
   className: string | null,
+  classChain: ReadonlySet<string> = new Set(),
 ): InterfaceBuilderObject["kind"] => {
+  for (const [kind, bases] of archivedKindBases)
+    if (bases.some((base) => classChain.has(base))) return kind;
   const value = className?.toLowerCase() ?? "";
   if (value.includes("constraint")) return "constraint";
   if (value.includes("layoutguide")) return "layout_guide";
