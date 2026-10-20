@@ -27,6 +27,10 @@ import { NonRegularFileReadError } from "../filesystem/RegularFile.js";
 import { RegularFileCleanupFailure } from "./RegularFileRead.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
+import {
+  AnalysisCleanupLeaseGroup,
+  type AnalysisCleanupLease,
+} from "../artifacts/AnalysisCleanupLease.js";
 import { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
 import { OwnedStagedOutput } from "../filesystem/OwnedStagedOutput.js";
 import { absoluteCallerPath } from "../filesystem/callerPath.js";
@@ -226,29 +230,32 @@ const writeTextPartsOwned = async (
         reason: failureMessage(cause.cleanupCause),
         resources: [cause.owner.directory],
       };
-      if (cause.outcome.ok)
-        return err(
-          new EvidenceFileError("write", "io", {
-            cause,
-            path: requestedPath,
-            cleanup,
-            published: { ...cause.outcome.value, path: requestedPath },
-          }),
-        );
-      if (cause.outcome.error instanceof AnalysisCancelledError)
-        return err(
-          new AnalysisCancelledError(cause.outcome.error.operation, {
-            cause,
-            cleanup,
-          }),
-        );
-      return err(
-        new EvidenceFileError("write", missingOrIo(cause.outcome.error), {
+      let error: EvidenceFileError | AnalysisCancelledError;
+      if (cause.outcome.ok) {
+        error = new EvidenceFileError("write", "io", {
           cause,
           path: requestedPath,
           cleanup,
-        }),
-      );
+          published: { ...cause.outcome.value, path: requestedPath },
+        });
+      } else if (cause.outcome.error instanceof AnalysisCancelledError) {
+        error = new AnalysisCancelledError(cause.outcome.error.operation, {
+          cause,
+          cleanup,
+        });
+      } else {
+        error = new EvidenceFileError(
+          "write",
+          missingOrIo(cause.outcome.error),
+          {
+            cause,
+            path: requestedPath,
+            cleanup,
+          },
+        );
+      }
+      new AnalysisCleanupLeaseGroup(error, [cause.lease]);
+      return err(error);
     }
     if (
       cancellation?.signal.aborted === true &&
@@ -331,7 +338,12 @@ const publishFile = async (
     output: owner,
   });
   if (released.kind === "failed")
-    throw new StagedOutputCleanupFailure(outcome, released.cause, owner);
+    throw new StagedOutputCleanupFailure(
+      outcome,
+      released.cause,
+      owner,
+      released.lease,
+    );
   if (!outcome.ok) throw outcome.error;
   return outcome.value.bytes;
 };
@@ -341,6 +353,7 @@ class StagedOutputCleanupFailure extends Error {
     readonly outcome: Result<PublishedEvidenceFile, unknown>,
     readonly cleanupCause: unknown,
     readonly owner: OwnedStagedOutput,
+    readonly lease: AnalysisCleanupLease,
   ) {
     super("Staged output cleanup failed", {
       cause: outcome.ok ? cleanupCause : outcome.error,
@@ -377,7 +390,9 @@ const writeStagedParts = async (
 
 const assertWriteActive = (cancellation?: TextWriteCancellation): void => {
   if (cancellation?.signal.aborted === true)
-    throw new AnalysisCancelledError(cancellation.operation);
+    throw new AnalysisCancelledError(cancellation.operation, {
+      cause: cancellation.signal.reason,
+    });
 };
 
 const fileErrorCode = (cause: unknown): unknown =>

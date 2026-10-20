@@ -4,7 +4,7 @@ import {
 } from "../../fixtures/historicalHar.js";
 import { inspectAnalysisView } from "../../../src/application/analysisView/AnalysisViewService.js";
 import { createHash } from "node:crypto";
-import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { expect } from "vitest";
@@ -28,6 +28,101 @@ import { createEvidence, parseEvidence } from "../../../src/domain/evidence.js";
 import { ghidraFunctionDossier } from "../../../src/domain/ghidraValues.fixture.js";
 import { createEvidenceBundle } from "../../../src/domain/evidenceBundle.js";
 import { inspectEvidenceBundle } from "../../../src/application/investigation/InspectEvidenceBundle.js";
+
+cliTest(
+  "authenticates an exact portable parent for non-managed views and rejects ambiguous or altered sources",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-analysis-bundle-cli-");
+    const path = join(root, "bundle.json");
+    const parent = analysisViewLayoutEvidence();
+    const view = {
+      kind: "item",
+      collection: "sections",
+      selector: { name: ".data" },
+    };
+    const request = {
+      source: { kind: "retained-evidence", evidence_id: parent.evidence_id },
+      view,
+    };
+    const bundle = createEvidenceBundle([
+      analysisViewJavaScriptEvidence(),
+      parent,
+    ]);
+    const original = JSON.stringify(bundle);
+    await writeFile(path, original);
+    const result = await cli.run({
+      arguments: [
+        "inspect-analysis-view",
+        JSON.stringify(request),
+        "--evidence-bundle",
+        path,
+        "--json",
+      ],
+    });
+    expect(result.exitCode).toBe(0);
+    const expected = inspectAnalysisView({
+      source: { kind: "inline", evidence: parent },
+      view,
+    });
+    if (!expected.ok) throw expected.error;
+    const evidence = parseEvidence(result.json);
+    expect(evidence.evidence_id).toBe(expected.value.evidence_id);
+    expect(evidence.normalized_result).toEqual(
+      expected.value.normalized_result,
+    );
+    expect(evidence.evidence_links).toEqual([parent.evidence_id]);
+    expect(await readFile(path, "utf8")).toBe(original);
+
+    for (const [source, expectedCode] of [
+      [{ kind: "inline", evidence: parent }, "invalid_request"],
+      [
+        { kind: "retained-evidence", evidence_id: `ev_${"f".repeat(64)}` },
+        "evidence_integrity_mismatch",
+      ],
+    ] as const) {
+      const rejected = await cli.run({
+        arguments: [
+          "inspect-analysis-view",
+          JSON.stringify({ source, view }),
+          "--evidence-bundle",
+          path,
+          "--json",
+        ],
+      });
+      expect(rejected.exitCode).toBe(1);
+      expect(rejected.json).toMatchObject({ code: expectedCode });
+      expect(rejected.json).not.toHaveProperty("evidence_id");
+    }
+    for (const [contents, expectedCode] of [
+      [JSON.stringify(parent), "invalid_request"],
+      ["{invalid JSON", "evidence_integrity_mismatch"],
+      [
+        JSON.stringify({
+          ...bundle,
+          records: bundle.records.map((record) => ({
+            ...record,
+            normalized_result: "altered",
+          })),
+        }),
+        "evidence_integrity_mismatch",
+      ],
+    ] as const) {
+      await writeFile(path, contents);
+      const rejected = await cli.run({
+        arguments: [
+          "inspect-analysis-view",
+          JSON.stringify(request),
+          "--evidence-bundle",
+          path,
+          "--json",
+        ],
+      });
+      expect(rejected.exitCode).toBe(1);
+      expect(rejected.json).toMatchObject({ code: expectedCode });
+      expect(rejected.json).not.toHaveProperty("evidence_id");
+    }
+  },
+);
 
 cliTest(
   "preserves native relationship coverage independently of exhausted CLI pages",

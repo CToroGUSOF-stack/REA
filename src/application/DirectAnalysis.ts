@@ -53,7 +53,11 @@ import {
 import type { AnalysisProviderSelector } from "../contracts/providerSelection.js";
 import { artifactInspectionResultSchema } from "../domain/artifactInspection.js";
 import { resolveXrefsAddress } from "./XrefsAddressResolution.js";
-import { AnalysisInputError } from "../domain/analysisErrorCore.js";
+import {
+  AnalysisCancelledError,
+  AnalysisInputError,
+} from "../domain/analysisErrorCore.js";
+import { deliverAnalysisEvidence } from "./EvidenceBundleCommands.js";
 import {
   directAnalysisCleanupFailure,
   managedAnalysisCleanupFailure,
@@ -139,24 +143,80 @@ export const runDirectAnalysis = async (
 /** Execute one provider-native semantic operation with atomic provenance. */
 export const runProviderAnalysis = async (
   dependencies: DirectAnalysisDependencies,
-  ...[path, tool, arguments_, logger = silentLogger, signal]: readonly [
-    path: string,
-    tool: NativeToolName | ArtifactAnalysisOperation | ManagedToolName,
-    arguments_: Readonly<Record<string, JsonValue>>,
-    logger?: Logger,
-    signal?: AbortSignal,
-  ]
+  ...[path, tool, arguments_, logger = silentLogger, signal, delivery]:
+    | readonly [
+        path: string,
+        tool: NativeToolName | ArtifactAnalysisOperation | ManagedToolName,
+        arguments_: Readonly<Record<string, JsonValue>>,
+        logger?: Logger | undefined,
+        signal?: AbortSignal | undefined,
+      ]
+    | readonly [
+        path: string,
+        tool: "inspect_managed_members",
+        arguments_: Readonly<Record<string, JsonValue>>,
+        logger: Logger | undefined,
+        signal: AbortSignal | undefined,
+        delivery: {
+          readonly detail?: "complete" | "summary";
+          readonly evidenceBundlePath?: string;
+        },
+      ]
 ): Promise<JsonValue> => {
-  if (isManagedToolName(tool))
-    return runManagedProviderAnalysis(
-      dependencies,
-      path,
-      tool,
-      arguments_,
-      signal,
+  if (delivery !== undefined && tool !== "inspect_managed_members")
+    return cliError(
+      new AnalysisInputError(tool, undefined, [
+        {
+          path: ["delivery"],
+          reason: "invalid_value",
+          message:
+            "Evidence delivery options are only supported by inspect_managed_members",
+        },
+      ]),
     );
-  return withProcessCancellation(signal, (operationSignal) =>
-    runAnalysis(dependencies, path, tool, arguments_, {
+  if (
+    delivery?.detail === "summary" &&
+    delivery.evidenceBundlePath === undefined
+  )
+    return cliError(
+      new AnalysisInputError(tool, undefined, [
+        {
+          path: ["evidence_bundle"],
+          reason: "missing_argument",
+          message:
+            "summary detail requires --evidence-bundle so complete Evidence remains available to later CLI commands",
+        },
+      ]),
+    );
+  return withProcessCancellation(signal, async (operationSignal) => {
+    if (isManagedToolName(tool)) {
+      const original = await runManagedProviderAnalysis(
+        dependencies,
+        path,
+        tool,
+        arguments_,
+        operationSignal,
+      );
+      if (!original.ok) return cliError(original.error);
+      if (operationSignal.aborted)
+        return cliError(
+          new AnalysisCancelledError(tool, {
+            cause: operationSignal.reason,
+            partialObservation: original.value,
+          }),
+        );
+      const result =
+        delivery?.evidenceBundlePath === undefined
+          ? original
+          : await deliverAnalysisEvidence(
+              original.value,
+              delivery.evidenceBundlePath,
+              delivery.detail,
+              operationSignal,
+            );
+      return result.ok ? result.value : cliError(result.error);
+    }
+    return runAnalysis(dependencies, path, tool, arguments_, {
       logger,
       snapshotPath: undefined,
       signal: operationSignal,
@@ -165,8 +225,8 @@ export const runProviderAnalysis = async (
         : NATIVE_INSPECTION_OPERATIONS.has(tool)
           ? { createSession: dependencies.createNativeBinarySession }
           : {}),
-    }),
-  );
+    });
+  });
 };
 
 /** Execute managed metadata inspection in an isolated managed-only session. */
@@ -192,13 +252,14 @@ export const runManagedProviderExecution = async (
     );
   });
 
+/** Preserve typed managed Evidence before selecting its CLI delivery. */
 const runManagedProviderAnalysis = async (
-  dependencies: DirectAnalysisDependencies,
+  dependencies: Pick<DirectAnalysisDependencies, "createManagedBinarySession">,
   path: string,
   tool: ManagedToolName,
   arguments_: Readonly<Record<string, JsonValue>>,
   signal?: AbortSignal,
-): Promise<JsonValue> => {
+): Promise<Result<Evidence, AnalysisError>> => {
   const execution = await runManagedProviderExecution(
     dependencies,
     path,
@@ -206,19 +267,21 @@ const runManagedProviderAnalysis = async (
     signal,
     arguments_,
   );
-  if (!execution.ok) return cliError(execution.error);
+  if (!execution.ok) return execution;
   const value = execution.value;
-  return createEvidence(value.subject ?? undefined, value.provider, {
-    operation: tool,
-    parameters: arguments_,
-    result: value.result,
-    rawResult: value.rawResult,
-    limitations: value.limitations,
-    ...(value.relationshipCoverage === undefined
-      ? {}
-      : { relationshipCoverage: value.relationshipCoverage }),
-    locations: value.locations,
-  });
+  return ok(
+    createEvidence(value.subject ?? undefined, value.provider, {
+      operation: tool,
+      parameters: arguments_,
+      result: value.result,
+      rawResult: value.rawResult,
+      limitations: value.limitations,
+      ...(value.relationshipCoverage === undefined
+        ? {}
+        : { relationshipCoverage: value.relationshipCoverage }),
+      locations: value.locations,
+    }),
+  );
 };
 
 const runAnalysis = async (

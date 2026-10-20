@@ -58,7 +58,11 @@ const readBundle = async (
   resources?: ArtifactResourceScope,
 ): Promise<Result<EvidenceBundle, EvidenceReadFailure>> => {
   if (signal?.aborted)
-    return err(new AnalysisCancelledError("import_evidence_bundle"));
+    return err(
+      new AnalysisCancelledError("import_evidence_bundle", {
+        cause: signal.reason,
+      }),
+    );
   const loaded = await readJsonFile(path, signal, resources).catch(
     (cause: unknown) => {
       // A failed close transfers a live handle owner; preserve that failure.
@@ -74,7 +78,11 @@ const readBundle = async (
   );
   if (!loaded.ok) return loaded;
   if (signal?.aborted)
-    return err(new AnalysisCancelledError("import_evidence_bundle"));
+    return err(
+      new AnalysisCancelledError("import_evidence_bundle", {
+        cause: signal.reason,
+      }),
+    );
   let bundle: EvidenceBundle;
   try {
     bundle = parseBundle(loaded.value);
@@ -125,7 +133,11 @@ export const writeEvidenceBundle = async (
   >
 > => {
   if (signal?.aborted === true)
-    return err(new AnalysisCancelledError("export_evidence_bundle"));
+    return err(
+      new AnalysisCancelledError("export_evidence_bundle", {
+        cause: signal.reason,
+      }),
+    );
   let checked: EvidenceBundle;
   try {
     checked = parseEvidenceBundle(bundle);
