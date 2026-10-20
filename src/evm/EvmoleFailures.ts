@@ -1,4 +1,5 @@
 import type { EvmWorkerLimits } from "./EvmWorkerLimits.js";
+import { artifactFileCancellationCause } from "../artifacts/ArtifactFileOperation.js";
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
 import {
   AnalysisError,
@@ -130,7 +131,7 @@ export const evmInterfaceFailure = (
   if (cause instanceof ArtifactReaderFailure) {
     if (cause.reason === "cancelled")
       return new AnalysisCancelledError("inspect_evm_interface", {
-        cause,
+        cause: artifactFileCancellationCause(cause),
         ...cleanupOptions,
       });
     if (cause.reason === "integrity")

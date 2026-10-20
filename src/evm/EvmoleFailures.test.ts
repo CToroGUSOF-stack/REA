@@ -1,5 +1,7 @@
 import { expect, it } from "vitest";
 import { evmInterfaceFailure } from "./EvmoleFailures.js";
+import { ArtifactFileCancelled } from "../artifacts/ArtifactFileOperation.js";
+import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
 import { OwnedCommandFailure } from "../process/OwnedCommand.js";
 import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 import type { ProviderProcessSnapshot } from "../process/ProviderProcess.js";
@@ -42,6 +44,59 @@ it.each([
     expect(result.cleanupIncomplete).toBe(false);
   },
 );
+
+it.each([
+  undefined,
+  null,
+  "caller stopped",
+  { requested: "stop" },
+  new Error("caller stopped"),
+])(
+  "preserves the exact artifact cancellation reason as opaque data: %s",
+  (reason) => {
+    for (const source of [
+      new ArtifactReaderFailure("cancelled", "Artifact read cancelled", {
+        cause: reason,
+      }),
+      new ArtifactReaderFailure("cancelled", "Artifact read cancelled", {
+        cause: new Error("file wrapper"),
+        cancellation: { reason },
+      }),
+      new ArtifactFileCancelled({
+        reason,
+        outcome: { kind: "completed", value: new Uint8Array([0x00]) },
+      }),
+    ]) {
+      const result = evmInterfaceFailure(
+        source,
+        "artifact-read",
+        "/selected.hex",
+      );
+      expect(result).toBeInstanceOf(AnalysisCancelledError);
+      expect(result.cause).toBe(reason);
+      expect(result.cleanupIncomplete).toBe(false);
+    }
+  },
+);
+
+it("keeps artifact cleanup evidence while unwrapping the cancellation reason", () => {
+  const reason = { requested: "stop" };
+  const result = evmInterfaceFailure(
+    new ArtifactReaderFailure("cancelled", "Artifact read cancelled", {
+      cause: reason,
+      cleanup: {
+        reason: "carrier descriptor close refused",
+        resources: ["/selected.hex"],
+      },
+    }),
+    "artifact-read",
+    "/selected.hex",
+  );
+  expect(result).toBeInstanceOf(AnalysisCancelledError);
+  expect(result.cause).toBe(reason);
+  expect(result.cleanupIncomplete).toBe(true);
+  expect(result.cleanupResources).toEqual(["/selected.hex"]);
+});
 
 it.each([
   { failure: "process" as const, cleanup: null, tag: "ProviderAdapterError" },
