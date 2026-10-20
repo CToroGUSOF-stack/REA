@@ -78,6 +78,9 @@ export const parseConfig = (
     ...(env.REA_GHIDRA_SEED_FILE === undefined
       ? {}
       : { ghidraSeedFile: env.REA_GHIDRA_SEED_FILE }),
+    ...(env.REA_GHIDRA_PDB_FILE === undefined
+      ? {}
+      : { ghidraPdbFile: env.REA_GHIDRA_PDB_FILE }),
     ...(env.REA_GHIDRA_DISABLED_ANALYZERS === undefined
       ? {}
       : { ghidraDisabledAnalyzers: env.REA_GHIDRA_DISABLED_ANALYZERS }),

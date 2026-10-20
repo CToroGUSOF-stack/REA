@@ -39,6 +39,12 @@ state, annotations, other target architectures and formats, and Hopper-only
 operations remain unavailable through this provider. Managed PE/CLI inspection
 uses its separate execution-free provider.
 
+A [caller-selected PDB](ghidra-provider.md#caller-selected-pdb) is read in
+place by the Ghidra JVM, not through the native snapshot owner; its path
+travels through the same batch quoting, so paths containing
+command-interpreter metacharacters are refused. Applying a PDB on Windows P0 is
+unverified.
+
 Raw 6502 imports retain the same native filesystem and process ownership
 requirements. The complete image must fit in the 16-bit address space; no
 console-specific cartridge loader, CPU variant, or bank-switching model is

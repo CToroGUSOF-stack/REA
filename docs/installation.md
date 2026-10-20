@@ -1111,6 +1111,15 @@ that the analyzer was disabled. For Windows PE resource analysis, the exact name
 is `WindowsResourceReference`. Disabling an analyzer skips the facts it would
 have produced.
 
+To apply the PDB from the same build as a PE target before auto-analysis:
+
+```bash
+export REA_GHIDRA_PDB_FILE=/absolute/path/to/app.pdb
+```
+
+REA refuses a PDB whose GUID and age differ from the target's CodeView record.
+See [caller-selected PDB](ghidra-provider.md#caller-selected-pdb).
+
 ### Ghidra heap and CPU controls
 
 Set resource controls in the environment that launches the CLI or MCP server,

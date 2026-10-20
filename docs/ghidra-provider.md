@@ -59,9 +59,45 @@ are omitted with an explicit resource limitation, rather than truncated.
 Original names and types may be missing even when auto-analysis completes.
 An empty name search does not establish that a function is absent; use
 `list_procedures` and address-based analysis to inspect recovered functions.
-REA imports a private executable copy and does not admit a caller-selected
-PDB companion. This reporting does not search symbol servers, copy a sibling
-PDB, or change analyzer settings.
+REA imports a private executable copy, so Ghidra does not find a sibling PDB on
+its own. This reporting does not search symbol servers, copy a sibling PDB, or
+change analyzer settings.
+
+### Caller-selected PDB
+
+To apply the PDB written by the same link as a PE target:
+
+```bash
+export REA_GHIDRA_PDB_FILE=/absolute/path/to/app.pdb
+```
+
+When the analysis profile is resolved, REA reads the PDB's MSF 7.00
+information and DBI streams and requires its GUID and age (the DBI age when
+present, as Ghidra uses) to equal the target's RSDS CodeView record. A PDB from
+another build, a PE without an RSDS GUID, or a non-PE target is refused with
+`unsupported_target`, naming both identities; an unreadable or non-MSF file is
+reported against `REA_GHIDRA_PDB_FILE`. The profile commits the resolved path,
+SHA-256, size, GUID and age in `pdb_companion`.
+
+Before auto-analysis, the `ReaGhidraApplyPdb.java` pre-script re-hashes the
+file, reads its GUID and age with Ghidra's own PDB reader, compares both with
+the commitment and with the Program's CodeView attributes, and only then calls
+`PdbUniversalAnalyzer.setPdbFileOption`. Any difference throws, which aborts
+processing before analysis and the bridge. After analysis, the session fails
+closed unless the bridge reports exactly the committed PDB and Ghidra reports
+`PDB Loaded`. Evidence then carries a `PDB applied: <path> (sha256 …, GUID …,
+age …)` limitation: names and types from the PDB are caller-supplied debug
+information, not Ghidra discoveries, and a matching GUID and age identify the
+build, not the completeness of the PDB. The PDB is read in place and never
+copied. `REA_GHIDRA_DISABLED_ANALYZERS` cannot disable `PDB Universal` while
+the setting is present.
+
+Recorded verification: `npm run verify:ghidra:pdb` on Linux x64 with Ghidra
+12.1.4 and Temurin 21 links a source-owned x86-64 PE and its PDB (clang and
+lld-link, run through zig 0.17.0's bundled toolchain), moves the PDB away from
+the path recorded in the image, and checks that names appear only with the
+setting, that a PDB from another link is refused, and that the pre-script
+aborts on a changed file. Windows P0 and large real-world PDBs are unverified.
 
 ## Loaded addresses and file offsets
 

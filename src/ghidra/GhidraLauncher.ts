@@ -5,6 +5,10 @@ import {
   type GhidraSeedCommitment,
 } from "./GhidraAnalysisSeeds.js";
 import type { GhidraLanguageOverride } from "../config/ghidraLanguageOverride.js";
+import {
+  GHIDRA_PDB_SCRIPT,
+  type GhidraPdbCommitment,
+} from "./GhidraPdbCompanion.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
 import { mkdir, realpath } from "node:fs/promises";
 import { basename, dirname, join, posix, win32 } from "node:path";
@@ -237,6 +241,8 @@ export interface GhidraHeadlessLauncherOptions {
   readonly disabledAnalyzers?: readonly string[];
   /** Caller seeds committed by the analysis profile, applied before analysis. */
   readonly analysisSeeds?: GhidraSeedCommitment;
+  /** Caller PDB committed by the analysis profile, verified before analysis. */
+  readonly pdbCompanion?: GhidraPdbCommitment;
   readonly analysisExtensions?: readonly GhidraExtension[];
   readonly pspExtension?: GhidraPspExtension;
   /** Remap typed float storage for the soft-float o32 ABI after analysis. */
@@ -386,6 +392,9 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
           ? {}
           : { languageOverride: this.options.languageOverride }),
         ...(seedPath === undefined ? {} : { seedPath }),
+        ...(this.options.pdbCompanion === undefined
+          ? {}
+          : { pdbCompanion: this.options.pdbCompanion }),
         ...(this.options.disabledAnalyzers === undefined
           ? {}
           : { disabledAnalyzers: this.options.disabledAnalyzers }),
@@ -693,6 +702,11 @@ export interface GhidraHeadlessArgumentOptions {
   readonly disabledAnalyzers?: readonly string[];
   /** Canonical seed snapshot passed to the pre-analysis seed script. */
   readonly seedPath?: string;
+  /** Caller PDB the pre-analysis script verifies and hands to the PDB analyzer. */
+  readonly pdbCompanion?: Pick<
+    GhidraPdbCommitment,
+    "path" | "sha256" | "guid" | "age"
+  >;
 }
 
 /** Build the complete read-only headless invocation in deterministic order. */
@@ -830,6 +844,18 @@ export const ghidraHeadlessArguments = (
           "-preScript",
           scriptPath.join(bridgeDirectory, GHIDRA_BRIDGE_SOURCES.applySeeds),
           options.seedPath,
+        ]),
+    // The PDB file option must be set before default auto-analysis runs the
+    // PDB analyzer; the script refuses a PDB that does not match the Program.
+    ...(options.pdbCompanion === undefined
+      ? []
+      : [
+          "-preScript",
+          scriptPath.join(bridgeDirectory, GHIDRA_PDB_SCRIPT),
+          options.pdbCompanion.path,
+          options.pdbCompanion.sha256,
+          options.pdbCompanion.guid,
+          String(options.pdbCompanion.age),
         ]),
     // Analyzer options must apply before default auto-analysis and before the
     // post-analysis repair and bridge scripts start serving.

@@ -63,6 +63,11 @@ const environmentSchema = z.object({
     .min(1)
     .refine(isAbsolute, "REA_GHIDRA_SEED_FILE must be absolute")
     .optional(),
+  REA_GHIDRA_PDB_FILE: z
+    .string()
+    .min(1)
+    .refine(isAbsolute, "REA_GHIDRA_PDB_FILE must be absolute")
+    .optional(),
   REA_ILSPY_CMD_PATH: z
     .string()
     .min(1)
@@ -188,6 +193,22 @@ export const parseEnvironment = (
           {
             setting: "REA_GHIDRA_COMPILER_SPEC_ID",
             constraint: "requires REA_GHIDRA_LANGUAGE_ID",
+          },
+        ],
+      }),
+    );
+  // The PDB is applied by this analyzer; disabling it would silently drop it.
+  if (
+    env.REA_GHIDRA_PDB_FILE !== undefined &&
+    env.REA_GHIDRA_DISABLED_ANALYZERS?.includes("PDB Universal") === true
+  )
+    return err(
+      new ConfigurationError("Invalid REA environment configuration", {
+        settings: [
+          {
+            setting: "REA_GHIDRA_DISABLED_ANALYZERS",
+            constraint:
+              "cannot disable PDB Universal while REA_GHIDRA_PDB_FILE is set",
           },
         ],
       }),

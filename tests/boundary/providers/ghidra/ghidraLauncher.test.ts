@@ -421,6 +421,68 @@ describe("Ghidra disabled analyzers", () => {
   });
 });
 
+describe("Ghidra caller PDB", () => {
+  const base = {
+    platform: "linux" as const,
+    projectRoot: "/tmp/project",
+    targetPath: "/tmp/target",
+    bridgeScriptPath: "/package/bridge/ReaGhidraBridge.java",
+    descriptorPath: "/tmp/session.json",
+    ghidraLogPath: "/tmp/ghidra.log",
+    scriptLogPath: "/tmp/script.log",
+  };
+  const pdbCompanion = {
+    path: "/symbols/app.pdb",
+    sha256: "b".repeat(64),
+    guid: "213292a1-809b-6608-4c4c-44205044422e",
+    age: 1,
+  };
+
+  it("verifies and applies the PDB after seeds and before analyzer options and analysis", () => {
+    const arguments_ = ghidraHeadlessArguments({
+      ...base,
+      seedPath: "/tmp/runtime/seeds/seeds.tsv",
+      pdbCompanion,
+      disabledAnalyzers: ["Stack"],
+    });
+    const script = arguments_.indexOf("/package/bridge/ReaGhidraApplyPdb.java");
+    expect(arguments_[script - 1]).toBe("-preScript");
+    expect(arguments_.slice(script + 1, script + 5)).toEqual([
+      "/symbols/app.pdb",
+      "b".repeat(64),
+      "213292a1-809b-6608-4c4c-44205044422e",
+      "1",
+    ]);
+    expect(
+      arguments_.indexOf("/package/bridge/ReaGhidraApplySeeds.java"),
+    ).toBeLessThan(script);
+    expect(script).toBeLessThan(
+      arguments_.indexOf("/package/bridge/ReaGhidraAnalysisOptions.java"),
+    );
+    expect(script).toBeLessThan(arguments_.indexOf("-postScript"));
+  });
+
+  it("uses the target platform's script path on Windows", () => {
+    const arguments_ = ghidraHeadlessArguments({
+      ...base,
+      platform: "win32",
+      bridgeScriptPath: win32.join("C:\\rea", "bridge", "ReaGhidraBridge.java"),
+      pdbCompanion: { ...pdbCompanion, path: "D:\\Symbols\\app.pdb" },
+    });
+    const script = arguments_.indexOf(
+      win32.join("C:\\rea", "bridge", "ReaGhidraApplyPdb.java"),
+    );
+    expect(arguments_[script - 1]).toBe("-preScript");
+    expect(arguments_[script + 1]).toBe("D:\\Symbols\\app.pdb");
+  });
+
+  it("adds no PDB script without a committed PDB", () => {
+    expect(ghidraHeadlessArguments(base)).not.toContain(
+      "/package/bridge/ReaGhidraApplyPdb.java",
+    );
+  });
+});
+
 describe("Ghidra Windows launcher", () => {
   it("keeps analysis repair outside Windows P0 authority", () => {
     const args = ghidraHeadlessArguments({
