@@ -1,0 +1,151 @@
+import { accessSync, constants, readFileSync, statSync } from "node:fs";
+import { dirname, isAbsolute, resolve } from "node:path";
+
+import type { ProviderAvailability } from "../application/AnalysisProvider.js";
+
+/** Resolved Leandec connection; every field comes from the caller's environment. */
+export interface LeandecSettings {
+  readonly python: string;
+  readonly server: string;
+  readonly cwd: string;
+  readonly environment: Readonly<Record<string, string | undefined>>;
+  readonly defaultTimeoutMs: number;
+  readonly importTimeoutMs: number;
+  readonly inventoryLimit: number;
+  readonly stringLimit: number;
+  readonly autoAnalyze: boolean;
+  readonly serverVersion: string;
+}
+
+export type LeandecSettingsResolution =
+  | { readonly ok: true; readonly settings: LeandecSettings }
+  | {
+      readonly ok: false;
+      readonly code:
+        | "not_configured"
+        | "executable_missing"
+        | "runtime_missing";
+      readonly reason: string;
+    };
+
+const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_IMPORT_TIMEOUT_MS = 3_600_000;
+const DEFAULT_INVENTORY_LIMIT = 50_000;
+const DEFAULT_STRING_LIMIT = 20_000;
+
+const integer = (raw: string | undefined, fallback: number): number => {
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? Math.trunc(value) : fallback;
+};
+
+/** Read SERVER_VERSION from the script so the profile reflects the real server. */
+const serverVersionOf = (server: string): string => {
+  try {
+    const source = readFileSync(server, "utf8");
+    const match = /SERVER_VERSION\s*=\s*"([^"]+)"/u.exec(source);
+    return match?.[1] ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+};
+
+/**
+ * Resolve the Leandec MCP server from the environment. Nothing here starts a
+ * process or reads the Leandec cache, so discovery stays side-effect free.
+ */
+export const resolveLeandecSettings = (
+  environment: Readonly<Record<string, string | undefined>>,
+): LeandecSettingsResolution => {
+  const configured = environment.LEANDEC_MCP_SERVER?.trim();
+  if (configured === undefined || configured.length === 0)
+    return {
+      ok: false,
+      code: "not_configured",
+      reason:
+        "Set LEANDEC_MCP_SERVER to the absolute path of Leandec's mcp_server.py to enable the Leandec provider.",
+    };
+  const server = isAbsolute(configured) ? configured : resolve(configured);
+  try {
+    if (!statSync(server).isFile()) throw new TypeError("not a file");
+    accessSync(server, constants.R_OK);
+  } catch {
+    return {
+      ok: false,
+      code: "executable_missing",
+      reason: `LEANDEC_MCP_SERVER does not name a readable file: ${server}`,
+    };
+  }
+  const python = environment.LEANDEC_PYTHON?.trim() || "python3";
+  if (python.includes("/")) {
+    try {
+      accessSync(python, constants.X_OK);
+    } catch {
+      return {
+        ok: false,
+        code: "runtime_missing",
+        reason: `LEANDEC_PYTHON is missing or not executable: ${python}`,
+      };
+    }
+  }
+  return {
+    ok: true,
+    settings: {
+      python,
+      server,
+      cwd: dirname(server),
+      environment,
+      defaultTimeoutMs: integer(
+        environment.LEANDEC_CALL_TIMEOUT_MS,
+        DEFAULT_TIMEOUT_MS,
+      ),
+      importTimeoutMs: integer(
+        environment.LEANDEC_IMPORT_TIMEOUT_MS,
+        DEFAULT_IMPORT_TIMEOUT_MS,
+      ),
+      inventoryLimit: integer(
+        environment.LEANDEC_INVENTORY_LIMIT,
+        DEFAULT_INVENTORY_LIMIT,
+      ),
+      stringLimit: integer(
+        environment.LEANDEC_STRING_LIMIT,
+        DEFAULT_STRING_LIMIT,
+      ),
+      autoAnalyze: environment.LEANDEC_AUTO_ANALYZE !== "0",
+      serverVersion: serverVersionOf(server),
+    },
+  };
+};
+
+/** Project a settings resolution into one provider availability observation. */
+export const leandecAvailability = (
+  resolution: LeandecSettingsResolution,
+  platform: NodeJS.Platform,
+): ProviderAvailability => {
+  if (!resolution.ok)
+    return {
+      status: "unavailable",
+      code: resolution.code,
+      reason: resolution.reason,
+      diagnostics: { platform },
+    };
+  if (platform === "win32")
+    return {
+      status: "unavailable",
+      code: "unsupported_host",
+      reason:
+        "Leandec's MCP server is developed and tested on macOS and Linux; Windows is not supported by this adapter.",
+      diagnostics: { platform, server: resolution.settings.server },
+    };
+  return {
+    status: "available",
+    code: null,
+    reason: null,
+    diagnostics: {
+      platform,
+      server: resolution.settings.server,
+      python: resolution.settings.python,
+      server_version: resolution.settings.serverVersion,
+      auto_analyze: resolution.settings.autoAnalyze,
+    },
+  };
+};
