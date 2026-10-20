@@ -54,6 +54,7 @@ describe("CLI command outcome classification", () => {
         ),
       installVersion: () => Promise.resolve(err("not called")),
       installedVersion: () => Promise.resolve(err("not called")),
+      optionalProviderReadiness: () => Promise.resolve([]),
       planMaintenance: () =>
         Promise.resolve({ status: "current", plannedActions: [] }),
     };

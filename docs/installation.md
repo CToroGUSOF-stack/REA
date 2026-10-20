@@ -414,6 +414,22 @@ installed REA skill. Run the returned scoped setup command to review and approve
 those changes, then restart affected agents. The plan is returned in terminal,
 non-TTY, and JSON modes without applying configuration changes.
 
+Updates keep dependency lifecycle scripts disabled for both npm and Bun.
+After verifying the new CLI version, the updater checks whether the installed
+Frida native module can load in a fresh Node process. It also checks an already
+current installation. `optionalProviderReadiness` reports this separately from
+the successful CLI update (`updated` or `current`, exit 0); loading the module
+does not verify device access or instrumentation. An unidentified installation
+has no readiness result.
+
+If Frida cannot load, inspect its diagnostic and the returned recovery command
+and working directory. The command explicitly runs only the resolved Frida
+package's install script, which may download or build its native binding; it is
+never executed by the updater. Rerun `rea update` afterward to check readiness.
+An absent optional dependency requires reinstalling REA with optional
+dependencies included. Probe failures remain unknown and do not claim that a
+binding is missing.
+
 ## Released package and main
 
 Repository main documents its current code and generated catalog. `@latest`

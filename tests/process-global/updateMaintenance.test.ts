@@ -1,4 +1,11 @@
-import { mkdir, readFile, rm, writeFile, access } from "node:fs/promises";
+import {
+  mkdir,
+  readFile,
+  rm,
+  writeFile,
+  access,
+  rename,
+} from "node:fs/promises";
 import { delimiter, dirname, join, relative, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -20,6 +27,218 @@ import { cliTest } from "../support/cli/cliFixture.js";
 
 const entryPoint = resolve("scripts/rea.mjs");
 let home: string;
+
+const readinessFixture = async (source?: string) => {
+  const packageRoot = join(home, "installed REA 测试");
+  await mkdir(packageRoot, { recursive: true });
+  await writeFile(
+    join(packageRoot, "package.json"),
+    JSON.stringify({ name: "rea-agents", version: "6.5.0" }),
+  );
+  if (source !== undefined) {
+    const fridaRoot = join(packageRoot, "node_modules", "frida");
+    await mkdir(fridaRoot, { recursive: true });
+    await writeFile(
+      join(fridaRoot, "package.json"),
+      JSON.stringify({
+        name: "frida",
+        version: "17.23.2",
+        type: "module",
+        main: "index.js",
+        scripts: {
+          install: "node -e \"process.stdout.write('scoped install')\"",
+        },
+      }),
+    );
+    await writeFile(join(fridaRoot, "index.js"), source);
+  }
+  return { manager: "npm", prefix: home, packageRoot } as const;
+};
+
+describe("installed optional native module readiness", () => {
+  it("loads the freshly installed module without invoking its device manager", async () => {
+    const installation = await readinessFixture(
+      'export const getDeviceManager = () => { throw new Error("must not enumerate devices"); };',
+    );
+    expect(
+      await systemUpdateHost().optionalProviderReadiness(installation),
+    ).toEqual([{ provider: "frida", scope: "native-module", status: "ready" }]);
+  });
+
+  it("preserves load errors and scopes explicit script recovery to the resolved dependency", async () => {
+    const installation = await readinessFixture(
+      'throw new Error("missing test native binding");',
+    );
+    const result =
+      await systemUpdateHost().optionalProviderReadiness(installation);
+    expect(result).toMatchObject([
+      {
+        provider: "frida",
+        status: "unavailable",
+        reason: "module-load-failed",
+        detail: "Error: missing test native binding",
+        recovery: {
+          command: [
+            "npm",
+            "--prefix",
+            join(installation.packageRoot, "node_modules", "frida"),
+            "run",
+            "install",
+            "--ignore-scripts=false",
+          ],
+          workingDirectory: installation.packageRoot,
+        },
+      },
+    ]);
+    const readiness = result[0];
+    if (readiness?.status === "ready" || readiness?.recovery === undefined)
+      throw new Error("Expected explicit recovery command.");
+    const repaired = await runUpdateCommand(
+      readiness.recovery.command,
+      process.env,
+      "structured",
+      readiness.recovery.workingDirectory,
+    );
+    expect(repaired).toMatchObject({ ok: true });
+    if (repaired.ok) expect(repaired.value).toContain("scoped install");
+  });
+
+  it("resolves a hoisted optional dependency and scopes Bun recovery to that exact package", async () => {
+    const installation = await readinessFixture(
+      'throw new Error("hoisted binding unavailable");',
+    );
+    const hoistedRoot = join(home, "node_modules", "frida");
+    await mkdir(dirname(hoistedRoot), { recursive: true });
+    await rename(
+      join(installation.packageRoot, "node_modules", "frida"),
+      hoistedRoot,
+    );
+    expect(
+      await systemUpdateHost().optionalProviderReadiness({
+        ...installation,
+        manager: "bun",
+        globalDirectory: home,
+      }),
+    ).toMatchObject([
+      {
+        status: "unavailable",
+        recovery: {
+          command: ["bun", "run", "--cwd", hoistedRoot, "install"],
+          workingDirectory: installation.packageRoot,
+        },
+      },
+    ]);
+  });
+
+  it("does not propose an install command when the resolved package has no install script", async () => {
+    const installation = await readinessFixture(
+      'throw new Error("no install script");',
+    );
+    await writeFile(
+      join(installation.packageRoot, "node_modules", "frida", "package.json"),
+      JSON.stringify({ name: "frida", main: "index.js", type: "module" }),
+    );
+    const result =
+      await systemUpdateHost().optionalProviderReadiness(installation);
+    expect(result).toMatchObject([
+      { status: "unavailable", reason: "module-load-failed" },
+    ]);
+    expect(result[0]).not.toHaveProperty("recovery");
+  });
+
+  it("reports an absent optional package without proposing a no-op rebuild", async () => {
+    const installation = await readinessFixture();
+    const result =
+      await systemUpdateHost().optionalProviderReadiness(installation);
+    expect(result).toMatchObject([
+      { status: "unavailable", reason: "dependency-absent" },
+    ]);
+    expect(result[0]).not.toHaveProperty("recovery");
+  });
+
+  it("keeps a probe process failure unknown rather than blaming a missing native binding", async () => {
+    const installation = await readinessFixture("process.exit(2);");
+    expect(
+      await systemUpdateHost().optionalProviderReadiness(installation),
+    ).toMatchObject([{ status: "unknown", reason: "probe-failed" }]);
+  });
+});
+
+describe("optional native module probe failure diagnostics", () => {
+  const assertStopped = async (pidPath: string) => {
+    const pid = Number(await readFile(pidPath, "utf8"));
+    expect(Number.isSafeInteger(pid) && pid > 0).toBe(true);
+    expect(() => process.kill(pid, 0)).toThrow();
+  };
+
+  it("preserves both output streams after the real probe deadline and waits for exit", async () => {
+    const pidPath = join(home, "timed-out-probe.pid");
+    const installation = await readinessFixture(
+      [
+        'import { writeFileSync, writeSync } from "node:fs";',
+        `writeFileSync(${JSON.stringify(pidPath)}, String(process.pid));`,
+        'writeSync(1, "timeout stdout diagnostic\\n");',
+        'writeSync(2, "timeout stderr diagnostic\\n");',
+        "setInterval(() => {}, 1000);",
+        "await new Promise(() => {});",
+      ].join("\n"),
+    );
+    const [readiness] =
+      await systemUpdateHost().optionalProviderReadiness(installation);
+    expect(readiness).toMatchObject({
+      status: "unknown",
+      reason: "probe-failed",
+    });
+    if (readiness === undefined || readiness.status === "ready")
+      throw new Error("Expected unknown readiness.");
+    expect(readiness.detail).toContain("timed out after 10000 ms");
+    expect(readiness.detail).toContain("stdout:\ntimeout stdout diagnostic\n");
+    expect(readiness.detail).toContain("stderr:\ntimeout stderr diagnostic\n");
+    expect(readiness.detail).toContain('"code":"ETIMEDOUT"');
+    expect(readiness.detail).toContain('"killed":true');
+    expect(readiness.detail).toContain('"outputTruncated":false');
+    expect(readiness).not.toHaveProperty("recovery");
+    await assertStopped(pidPath);
+  });
+
+  it.each([1, 2])(
+    "preserves bounded diagnostics when stream %i exceeds the output limit",
+    async (stream) => {
+      const pidPath = join(home, "output-limited-probe.pid");
+      const installation = await readinessFixture(
+        [
+          'import { writeFileSync, writeSync } from "node:fs";',
+          `writeFileSync(${JSON.stringify(pidPath)}, String(process.pid));`,
+          'writeSync(1, "limit stdout diagnostic\\n");',
+          'writeSync(2, "limit stderr diagnostic\\n");',
+          `writeSync(${String(stream)}, "x".repeat(128 * 1024));`,
+          "setInterval(() => {}, 1000);",
+          "await new Promise(() => {});",
+        ].join("\n"),
+      );
+      const [readiness] =
+        await systemUpdateHost().optionalProviderReadiness(installation);
+      expect(readiness).toMatchObject({
+        status: "unknown",
+        reason: "probe-failed",
+      });
+      if (readiness === undefined || readiness.status === "ready")
+        throw new Error("Expected unknown readiness.");
+      expect(readiness.detail).toContain("stdout:\nlimit stdout diagnostic\n");
+      expect(readiness.detail).toContain("stderr:\nlimit stderr diagnostic\n");
+      expect(readiness.detail).toContain(
+        '"code":"ERR_CHILD_PROCESS_STDIO_MAXBUFFER"',
+      );
+      expect(readiness.detail).toContain('"outputTruncated":true');
+      // Both streams retain their existing 64 KiB budget; metadata adds only a small envelope.
+      expect(Buffer.byteLength(readiness.detail)).toBeLessThan(
+        2 * 64 * 1024 + 8192,
+      );
+      expect(readiness).not.toHaveProperty("recovery");
+      await assertStopped(pidPath);
+    },
+  );
+});
 
 beforeEach(async () => {
   home = await createTestTempDirectory("rea-update-maintenance-");

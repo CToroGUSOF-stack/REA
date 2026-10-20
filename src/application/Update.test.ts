@@ -19,8 +19,15 @@ import {
 } from "./UpdateRuntime.js";
 import type { IntegrationMaintenance } from "./UpdateMaintenance.js";
 import { isUpdateFailure } from "./UpdateFailure.js";
+import type { OptionalProviderReadiness } from "../domain/OptionalProviderReadiness.js";
 
 class FakeUpdateHost implements UpdateHost {
+  readiness: readonly OptionalProviderReadiness[] = [];
+  readinessInstallation: UpdateInstallation | undefined;
+  optionalProviderReadiness = (installation: UpdateInstallation) => {
+    this.readinessInstallation = installation;
+    return Promise.resolve(this.readiness);
+  };
   release: Result<string, ReleaseLookupFailure> = ok("3.3.0");
   installationResult: UpdateInstallation | undefined = {
     manager: "npm",
@@ -77,12 +84,46 @@ describe("REA update", () => {
       currentVersion: "3.3.0",
       latestVersion: "3.3.0",
       installMethod: "npm",
+      optionalProviderReadiness: [],
     });
     expect(host.installationInspected).toBe(true);
     expect(host.installedVersions).toEqual([]);
+    expect(host.readinessInstallation).toEqual(host.installationResult);
     expect(host.maintenanceInspected).toBe(false);
   });
+});
 
+describe("REA update optional native module readiness", () => {
+  it.each(["3.2.1", "3.3.0"])(
+    "reports optional native load failure without failing a successful update from %s",
+    async (version) => {
+      const host = new FakeUpdateHost();
+      host.readiness = [
+        {
+          provider: "frida",
+          scope: "native-module",
+          status: "unavailable",
+          reason: "module-load-failed",
+          detail: "Could not locate the bindings file.",
+          remediation: "Run the recovery command, then rerun rea update.",
+          recovery: {
+            command: ["npm", "rebuild", "frida", "--ignore-scripts=false"],
+            workingDirectory: "/fixture/lib/node_modules/rea-agents",
+          },
+        },
+      ];
+      const result = await runUpdate(version, host);
+      expect(result).toMatchObject({
+        status: version === "3.3.0" ? "current" : "updated",
+        optionalProviderReadiness: host.readiness,
+      });
+      expect(host.readinessInstallation).toEqual(host.installationResult);
+      expect(isUpdateFailure(result)).toBe(false);
+    },
+  );
+});
+
+describe("REA update outcomes", () => {
   it("preserves update status while marking incomplete resource cleanup as failure", async () => {
     const host = new FakeUpdateHost();
     host.cleanupFailure = "Regular file remains open: /fixture/skill/SKILL.md";
@@ -105,6 +146,7 @@ describe("REA update", () => {
       installMethod: "unknown",
     });
     expect(host.installedVersions).toEqual([]);
+    expect(host.readinessInstallation).toBeUndefined();
   });
 
   it("installs the resolved release and verifies the same package root", async () => {
@@ -165,6 +207,7 @@ describe("REA update", () => {
       installedVersion: "3.4.0",
     });
     expect(host.maintenanceInspected).toBe(false);
+    expect(host.readinessInstallation).toBeUndefined();
   });
 
   it("preserves executable verification diagnostics after npm succeeded", async () => {

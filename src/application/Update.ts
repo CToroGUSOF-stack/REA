@@ -2,6 +2,7 @@ import { gt, valid } from "semver";
 
 import { PRODUCT_IDENTITY } from "../identity.js";
 import type { Result } from "../domain/result.js";
+import type { OptionalProviderReadiness } from "../domain/OptionalProviderReadiness.js";
 import type { IntegrationMaintenance } from "./UpdateMaintenance.js";
 export { isUpdateFailure } from "./UpdateFailure.js";
 
@@ -49,6 +50,9 @@ export interface UpdateHost {
   planMaintenance(
     installation: UpdateInstallation,
   ): Promise<IntegrationMaintenance>;
+  optionalProviderReadiness(
+    installation: UpdateInstallation,
+  ): Promise<readonly OptionalProviderReadiness[]>;
   close?(): Promise<string | undefined>;
 }
 
@@ -59,6 +63,7 @@ export type UpdateResult = (
       readonly currentVersion: string;
       readonly latestVersion: string;
       readonly installMethod: UpdateInstallation["manager"] | "unknown";
+      readonly optionalProviderReadiness?: readonly OptionalProviderReadiness[];
     }
   | {
       readonly status: "updated";
@@ -68,6 +73,7 @@ export type UpdateResult = (
       readonly installMethod: UpdateInstallation["manager"];
       readonly command: readonly string[];
       readonly maintenance: IntegrationMaintenance;
+      readonly optionalProviderReadiness: readonly OptionalProviderReadiness[];
       readonly remediation: string;
     }
   | {
@@ -195,6 +201,12 @@ const runUpdateWorkflow = async (
       currentVersion,
       latestVersion: targetVersion,
       installMethod: installation?.manager ?? "unknown",
+      ...(installation === undefined
+        ? {}
+        : {
+            optionalProviderReadiness:
+              await host.optionalProviderReadiness(installation),
+          }),
     };
   if (installation === undefined)
     return {
@@ -229,6 +241,8 @@ const runUpdateWorkflow = async (
       remediation: `${installation.manager} completed, but REA could not verify ${targetVersion} in ${installation.packageRoot}: ${verified.ok ? `the executable reported ${verified.value}` : verified.error}. The installation may have changed; repair it before retrying.`,
     };
   const maintenance = await host.planMaintenance(installation);
+  const optionalProviderReadiness =
+    await host.optionalProviderReadiness(installation);
   return {
     status: "updated",
     previousVersion: currentVersion,
@@ -237,6 +251,7 @@ const runUpdateWorkflow = async (
     installMethod: installation.manager,
     command: updateInstallCommand(installation, targetVersion),
     maintenance,
+    optionalProviderReadiness,
     remediation:
       maintenance.status === "planned"
         ? "REA is updated. Run the maintenance command to review and approve changes to existing REA integrations, then restart affected agents."
