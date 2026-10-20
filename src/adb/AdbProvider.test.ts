@@ -1060,7 +1060,7 @@ exit 1`,
   const localFile = join(root, "payload.bin");
   await writeFile(localFile, "push-payload");
   const digest = createHash("sha256").update("push-payload").digest("hex");
-  const pushed = await evidenceResult(providerOver(binary), {
+  const pushed = await providerOver(binary).execute({
     operation: "push_adb_file",
     input: {
       serial: "emulator-5554",
@@ -1069,13 +1069,47 @@ exit 1`,
       overwrite: false,
     },
   });
-  expect(pushed).toMatchObject({
+  if (!pushed.ok) throw pushed.error;
+  expect(pushed.value.result).toMatchObject({
     bytes: 12,
     sha256: digest,
     device_sha256: digest,
     overwritten: false,
     device_digest_source: "device_sha256sum",
   });
+  expect(pushed.value.limitations).toEqual([
+    "Push writes the caller's file to the device",
+  ]);
+});
+
+it("reports device mutation when the device has no sha256sum", async () => {
+  const { binary, root } = await writeAdbStub(
+    () => `if [ "$1" = "version" ]; then ${VERSION_BLOCK}; exit 0; fi
+if [ "$1" = "-s" ] && [ "$4" = "test" ]; then exit 1; fi
+if [ "$1" = "-s" ] && [ "$3" = "push" ]; then exit 0; fi
+if [ "$1" = "-s" ] && [ "$4" = "sha256sum" ]; then printf 'sh: sha256sum: not found\\n' >&2; exit 127; fi
+exit 1`,
+  );
+  const localFile = join(root, "payload.bin");
+  await writeFile(localFile, "push-payload");
+  const pushed = await providerOver(binary).execute({
+    operation: "push_adb_file",
+    input: {
+      serial: "emulator-5554",
+      local_path: localFile,
+      device_path: "/data/local/tmp/payload.bin",
+      overwrite: false,
+    },
+  });
+  if (!pushed.ok) throw pushed.error;
+  expect(pushed.value.result).toMatchObject({
+    device_sha256: null,
+    device_digest_source: "unavailable",
+  });
+  expect(pushed.value.limitations).toEqual([
+    "The device did not answer sha256sum, so the transfer is not device-side verified",
+    "Push writes the caller's file to the device",
+  ]);
 });
 
 it("pushes the same private bytes that its reported digest identifies", async () => {
