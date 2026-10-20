@@ -1,6 +1,10 @@
 import * as t from "@babel/types";
 import type { JavaScriptSemanticPrimitive } from "./javascriptSemanticValueTypes.js";
 import { SEMANTIC_EXPRESSION_DEPTH_LIMIT } from "./javascriptSemanticResourceLimits.js";
+import {
+  childNodes,
+  traverseJavaScriptAst,
+} from "./javascriptSemanticTraversal.js";
 
 /** TypeScript receiver annotations occupy no positional runtime parameter slot. */
 export const runtimeFunctionParameters = (
@@ -42,6 +46,132 @@ export const unwrapJavaScriptExpression = (
     depth += 1;
   }
   return { node: current, depth };
+};
+
+/** Follow a returned value without changing call-reference or side-effect rules. */
+export const javaScriptExpressionValue = (node: t.Node): t.Node => {
+  for (;;) {
+    node = unwrapJavaScriptExpression(node).node;
+    if (t.isSequenceExpression(node) && node.expressions.length > 0)
+      node = node.expressions.at(-1)!;
+    else if (t.isAssignmentExpression(node, { operator: "=" }))
+      node = node.right;
+    else return node;
+  }
+};
+
+/** Prove scalar results without invoking an unknown operand's coercion hooks. */
+export const isPrimitiveJavaScriptExpression = (node: t.Node): boolean => {
+  const pending = [{ node, depth: 0 }];
+  while (pending.length > 0) {
+    const item = pending.pop()!;
+    const value = unwrapJavaScriptExpression(item.node);
+    const depth = item.depth + value.depth + 1;
+    if (depth > SEMANTIC_EXPRESSION_DEPTH_LIMIT) return false;
+    node = value.node;
+    if (readExactJavaScriptLiteral(node).found || t.isBigIntLiteral(node))
+      continue;
+    let operands: readonly t.Node[];
+    if (
+      t.isBinaryExpression(node) &&
+      !["in", "instanceof"].includes(node.operator)
+    ) {
+      if (node.operator === "===" || node.operator === "!==") continue;
+      operands = [node.left, node.right];
+    } else if (t.isUnaryExpression(node)) {
+      if (["void", "typeof", "!", "delete"].includes(node.operator)) continue;
+      operands = [node.argument];
+    } else if (t.isTemplateLiteral(node)) operands = node.expressions;
+    else if (t.isSequenceExpression(node)) operands = node.expressions;
+    else if (t.isAssignmentExpression(node, { operator: "=" }))
+      operands = [node.right];
+    else return false;
+    for (const operand of operands) pending.push({ node: operand, depth });
+  }
+  return true;
+};
+
+/** Effectful inputs still evaluated when an expression returns a scalar. */
+export const javaScriptScalarEvaluationSources = (
+  expression: t.Node,
+): readonly t.Node[] => {
+  const sources: t.Node[] = [];
+  const ownedChildren = new WeakSet<t.Node>();
+  traverseJavaScriptAst(expression, {
+    skip: (node) =>
+      (t.isFunction(node) && !t.isObjectMethod(node)) ||
+      ownedChildren.has(node),
+    enter: (node) => {
+      if (node === expression) return;
+      if (t.isObjectMethod(node) || t.isObjectProperty(node)) {
+        if (node.computed) sources.push(node.key);
+        if (t.isObjectMethod(node))
+          for (const child of childNodes(node)) ownedChildren.add(child);
+      }
+      if (
+        t.isCallExpression(node) ||
+        t.isOptionalCallExpression(node) ||
+        t.isNewExpression(node) ||
+        t.isMemberExpression(node) ||
+        t.isOptionalMemberExpression(node) ||
+        t.isAwaitExpression(node) ||
+        t.isYieldExpression(node) ||
+        t.isClass(node) ||
+        t.isTaggedTemplateExpression(node) ||
+        t.isSpreadElement(node) ||
+        ((t.isBinaryExpression(node) ||
+          t.isUnaryExpression(node) ||
+          t.isTemplateLiteral(node)) &&
+          !isPrimitiveJavaScriptExpression(node))
+      ) {
+        sources.push(node);
+        // The consumer follows each selected source's evaluated inputs.
+        for (const child of childNodes(node)) ownedChildren.add(child);
+      }
+    },
+  });
+  return sources;
+};
+
+/** Intrinsic scalar slots on a newly created callable, before external writes. */
+export const isPrimitiveJavaScriptCallableProperty = (
+  node: t.Node,
+  path: readonly unknown[],
+): boolean => {
+  if (!t.isFunction(node) && !t.isClass(node)) return false;
+  if (
+    !(
+      (path.length === 1 && (path[0] === "name" || path[0] === "length")) ||
+      (path.length === 2 && path[0] === "name" && path[1] === "length")
+    )
+  )
+    return false;
+  if (
+    t.isClass(node) &&
+    ((node.decorators?.length ?? 0) > 0 ||
+      node.body.body.some((member) => {
+        if (
+          t.isStaticBlock(member) ||
+          ("decorators" in member && (member.decorators?.length ?? 0) > 0)
+        )
+          return true;
+        if (!("static" in member) || !member.static) return false;
+        if (!t.isClassMethod(member) && !t.isClassProperty(member)) return true;
+        const key = semanticStaticPropertyKey(member.key, member.computed);
+        if (key === null || key === path[0]) return true;
+        // Unrelated method bodies are not executed at class definition. Only
+        // inert field initializers can prove they leave the metadata intact.
+        return (
+          t.isClassProperty(member) &&
+          member.value != null &&
+          !readExactJavaScriptLiteral(member.value).found &&
+          !t.isFunction(member.value)
+        );
+      }))
+  )
+    // Static definitions/initializers or decorators can replace the own slots.
+    return false;
+  return true;
 };
 
 /** Read one syntax-level primitive only when its value is exact. */
