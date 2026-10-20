@@ -18,6 +18,7 @@ import {
 } from "../../../src/catalogIdentity.js";
 import { compactPresentationForMcpInputSchemaProfile } from "../../../src/config/mcpInputSchemaProfile.js";
 import { MCP_STARTUP_POLICY } from "../../../src/mcpStartupPolicy.js";
+import { measureMcpDoctorCatalog } from "../../../src/mcpDoctorCatalog.js";
 
 afterEach(() => vi.useRealTimers());
 
@@ -35,6 +36,7 @@ describe("production MCP doctor", () => {
       ok: false,
       error: {
         healthy: false,
+        catalog: null,
         checks: [{ name: "transport", ok: false }],
       },
       meta: {
@@ -117,6 +119,27 @@ describe("production MCP doctor", () => {
       expect(result.identity?.observed_catalog_digest).toBe(
         identity.digests.combined_sha256,
       );
+      expect(result.catalog).toMatchObject({
+        profiles: {
+          input_schema: environment.REA_MCP_INPUT_SCHEMA_PROFILE,
+          output_schema: environment.REA_MCP_OUTPUT_SCHEMA_PROFILE,
+        },
+        complete: true,
+        tools_list_json_bytes: expect.any(Number),
+        largest_tool: { name: expect.any(String) },
+        largest_input_schema: { name: expect.any(String) },
+      });
+      expect(result.catalog?.tools_list_json_bytes).toBe(
+        (result.catalog?.input_schema_json_bytes ?? 0) +
+          (result.catalog?.output_schema_json_bytes ?? 0) +
+          (result.catalog?.other_json_bytes ?? 0),
+      );
+      if (environment.REA_MCP_OUTPUT_SCHEMA_PROFILE === "off") {
+        expect(result.catalog?.output_schema_json_bytes).toBe(0);
+        expect(result.catalog?.largest_output_schema).toBeNull();
+      } else {
+        expect(result.catalog?.output_schema_json_bytes).toBeGreaterThan(0);
+      }
     },
     30_000,
   );
@@ -128,6 +151,9 @@ describe("production MCP doctor probe validation", () => {
     const snapshotPath = join(root, "reply.json");
     const environment = { PATH: process.env.PATH ?? "" };
     const client = new Client({ name: "doctor-reply-capture", version: "1" });
+    let expectedCatalogBytes = 0;
+    let expectedInputBytes = 0;
+    let expectedOutputBytes = 0;
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: [resolve("scripts/rea.mjs"), "mcp"],
@@ -139,6 +165,16 @@ describe("production MCP doctor probe validation", () => {
     try {
       await client.connect(transport);
       const tools = await client.listTools();
+      expectedCatalogBytes = Buffer.byteLength(JSON.stringify(tools), "utf8");
+      for (const tool of tools.tools) {
+        expectedInputBytes += Buffer.byteLength(
+          JSON.stringify(tool.inputSchema),
+        );
+        if (tool.outputSchema !== undefined)
+          expectedOutputBytes += Buffer.byteLength(
+            JSON.stringify(tool.outputSchema),
+          );
+      }
       const prompts = await client.listPrompts();
       const toolDefinition = tools.tools.find(
         ({ name }) => name === "binary_session",
@@ -182,6 +218,15 @@ describe("production MCP doctor probe validation", () => {
       expect(result.inventory?.prompts.observed).toBe(
         CATALOG_IDENTITY.counts.mcp_prompts,
       );
+      expect(result.catalog).toMatchObject({
+        profiles: { input_schema: "full", output_schema: "full" },
+        complete: true,
+        tools_list_json_bytes: expectedCatalogBytes,
+        input_schema_json_bytes: expectedInputBytes,
+        output_schema_json_bytes: expectedOutputBytes,
+        other_json_bytes:
+          expectedCatalogBytes - expectedInputBytes - expectedOutputBytes,
+      });
       expect(result.checks).toContainEqual({
         name: "initialize",
         ok: true,
@@ -203,6 +248,70 @@ describe("production MCP doctor probe validation", () => {
       missing: ["a"],
       unexpected: ["c"],
       duplicates: ["c"],
+    });
+  });
+});
+
+describe("MCP doctor catalog byte accounting", () => {
+  const profiles = { input_schema: "full", output_schema: "full" } as const;
+
+  it("counts UTF-8, JSON escaping, long strings and metadata without conflating largest contributors", () => {
+    const verbose = {
+      name: "descriptive-tool",
+      description: `${"x".repeat(8190)}😀\\\n"汉字${"🛠".repeat(4096)}`,
+      inputSchema: { type: "object" as const },
+    };
+    const schemaHeavy = {
+      name: "schema-tool",
+      inputSchema: { type: "object" as const, description: '多字节\\\n"' },
+      outputSchema: { type: "object" as const, description: "output😀" },
+    };
+    const result = {
+      tools: [verbose, schemaHeavy],
+      _meta: { source: "含有元数据😀" },
+    };
+    const bytes = (value: unknown) =>
+      Buffer.byteLength(JSON.stringify(value), "utf8");
+    const input = bytes(verbose.inputSchema) + bytes(schemaHeavy.inputSchema);
+    const output = bytes(schemaHeavy.outputSchema);
+    expect(measureMcpDoctorCatalog(result, profiles)).toMatchObject({
+      complete: true,
+      tools_list_json_bytes: bytes(result),
+      input_schema_json_bytes: input,
+      output_schema_json_bytes: output,
+      other_json_bytes: bytes(result) - input - output,
+      largest_tool: {
+        name: verbose.name,
+        json_bytes: bytes(verbose),
+        input_schema_json_bytes: bytes(verbose.inputSchema),
+        output_schema_json_bytes: 0,
+      },
+      largest_input_schema: {
+        name: schemaHeavy.name,
+        json_bytes: bytes(schemaHeavy.inputSchema),
+      },
+      largest_output_schema: { name: schemaHeavy.name, json_bytes: output },
+    });
+  });
+
+  it("distinguishes an observed empty catalog from failed discovery and unobserved output schemas", () => {
+    const result = { tools: [] };
+    expect(measureMcpDoctorCatalog(result, profiles)).toMatchObject({
+      complete: true,
+      tools_list_json_bytes: Buffer.byteLength(JSON.stringify(result)),
+      input_schema_json_bytes: 0,
+      output_schema_json_bytes: 0,
+      largest_tool: null,
+      largest_input_schema: null,
+      largest_output_schema: null,
+    });
+  });
+
+  it("labels a response with a continuation cursor as a page rather than a complete catalog", () => {
+    const result = { tools: [], nextCursor: "next-page" };
+    expect(measureMcpDoctorCatalog(result, profiles)).toMatchObject({
+      complete: false,
+      tools_list_json_bytes: Buffer.byteLength(JSON.stringify(result)),
     });
   });
 });

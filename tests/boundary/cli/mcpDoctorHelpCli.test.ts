@@ -6,6 +6,53 @@ const CLI_INTEGRATION_TIMEOUT_MS = 60_000;
 
 describe("MCP doctor help boundary", () => {
   workspaceCliTest(
+    "reports actual catalog sizes and selected profiles through the compiled CLI and full-output envelope",
+    async ({ cli }) => {
+      const full = await cli.run({
+        arguments: ["mcp", "doctor", "--json"],
+        environment: {
+          REA_MCP_INPUT_SCHEMA_PROFILE: "full",
+          REA_MCP_OUTPUT_SCHEMA_PROFILE: "full",
+        },
+      });
+      expect(full.exitCode).toBe(0);
+      expect(full.json).toMatchObject({
+        healthy: true,
+        catalog: {
+          profiles: { input_schema: "full", output_schema: "full" },
+          complete: true,
+          tools_list_json_bytes: expect.any(Number),
+          output_schema_json_bytes: expect.any(Number),
+          largest_output_schema: { name: expect.any(String) },
+        },
+      });
+      const compact = await cli.run({
+        arguments: ["mcp", "doctor", "--json", "--full-output"],
+        environment: {
+          REA_MCP_INPUT_SCHEMA_PROFILE: "compact",
+          REA_MCP_OUTPUT_SCHEMA_PROFILE: "off",
+        },
+      });
+      expect(compact.exitCode).toBe(0);
+      expect(compact.json).toMatchObject({
+        ok: true,
+        data: {
+          healthy: true,
+          catalog: {
+            profiles: { input_schema: "compact", output_schema: "off" },
+            complete: true,
+            tools_list_json_bytes: expect.any(Number),
+            output_schema_json_bytes: 0,
+            largest_output_schema: null,
+          },
+        },
+        meta: { command: "rea mcp doctor" },
+      });
+    },
+    CLI_INTEGRATION_TIMEOUT_MS,
+  );
+
+  workspaceCliTest(
     "answers the advertised help option instead of validating it",
     async ({ cli }) => {
       const parent = await cli.run({ arguments: ["mcp", "--help"] });

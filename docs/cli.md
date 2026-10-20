@@ -434,6 +434,30 @@ bytes as text, omitting a final UTF-8 code point if it crosses that byte limit.
 diagnostics appear inside the report when `--full-output` is selected. Log
 truncation alone does not change the diagnostic health or exit status.
 
+The report's `catalog` measures the actual SDK-observed `tools/list` result.
+It records the requested child input/output schema `profiles`, exact compact
+UTF-8 JSON bytes in `tools_list_json_bytes`, input/output schema value totals,
+and the remaining `other_json_bytes` (keys, descriptions, annotations and result
+metadata). The three byte totals add up to the measured result size.
+`largest_tool`, `largest_input_schema` and `largest_output_schema` identify the
+largest contributors without returning the schemas again. An absent output
+schema contributes zero bytes; an empty catalog has null largest entries.
+
+`catalog: null` means discovery failed before the catalog could be measured,
+not that it was empty. A continuation cursor makes `catalog.complete` false:
+the measurement then covers only that received page. Sizes exclude the
+JSON-RPC envelope and transport framing. They are not model token counts or
+proof that a particular client/model accepts the catalog; the identity check
+independently checks that the child matches its requested configuration.
+Size alone does not change health or exit status.
+
+Compare profiles by setting the MCP child's existing
+`REA_MCP_INPUT_SCHEMA_PROFILE=compact` or
+`REA_MCP_OUTPUT_SCHEMA_PROFILE=off` environment variables and rerunning doctor.
+The [schema profile contracts](mcp-contracts.md#compact-input-schema-profile)
+describe the information omitted by each option. Doctor reports the selected
+configuration and does not change it.
+
 The default terminal format is TOON. Use `--json` when saving results for a
 JSON consumer. Valued output flags (`--format`, `--filter-output`,
 `--token-limit`, `--token-offset`) accept `--flag value` or `--flag=value`; a
