@@ -7,6 +7,11 @@ import { fileURLToPath } from "node:url";
 import { inspectJadxProvider } from "./android/JadxDoctor.js";
 import { inspectSystemGhidraProvider } from "./ghidra/GhidraDoctor.js";
 import { inspectIdaRegistration } from "./ida/IdaDoctor.js";
+import { inspectAngrRegistration } from "./angr/AngrDoctor.js";
+import {
+  angrRequestBudgetMs,
+  readAngrConfiguration,
+} from "./angr/AngrConfiguration.js";
 import { inspectKunaProvider } from "./kuna/KunaDoctor.js";
 import { readIdaConfiguration } from "./ida/IdaConfiguration.js";
 import { parseJebMcpEndpoint } from "./jeb/JebMcpEndpoint.js";
@@ -38,16 +43,34 @@ export const createSystemDoctorHost = (
       analysisProvider,
       registrationEnvironment,
     ) => {
-      if (analysisProvider !== "ida" && analysisProvider !== "auto")
-        return ok(undefined);
-      const path = registrationEnvironment.REA_IDA_MCP_CONFIG;
-      if (path === undefined) return ok(undefined);
-      const registration = readIdaConfiguration(path);
-      if (registration.ok) return ok(registration.value.timeoutMs);
-      // An invalid IDA registration cannot be selected automatically. Keep it
-      // out of recommendations for another available provider, but surface the
-      // parser-owned error when IDA itself was explicitly selected.
-      return analysisProvider === "ida" ? registration : ok(undefined);
+      const budgets: number[] = [];
+      // An invalid registration cannot be selected automatically. Keep it out
+      // of recommendations for another available provider, but surface the
+      // parser-owned error when that provider itself was explicitly selected.
+      if (analysisProvider === "ida" || analysisProvider === "auto") {
+        const path = registrationEnvironment.REA_IDA_MCP_CONFIG;
+        if (path !== undefined) {
+          const registration = readIdaConfiguration(path);
+          if (registration.ok) budgets.push(registration.value.timeoutMs);
+          else if (analysisProvider === "ida") return registration;
+        }
+      }
+      if (analysisProvider === "angr" || analysisProvider === "auto") {
+        const sources = {
+          mcpConfigPath: registrationEnvironment.REA_ANGR_MCP_CONFIG,
+          pythonPath: registrationEnvironment.REA_ANGR_PYTHON,
+        };
+        if (
+          sources.mcpConfigPath !== undefined ||
+          sources.pythonPath !== undefined
+        ) {
+          const registration = readAngrConfiguration(sources);
+          if (registration.ok)
+            budgets.push(angrRequestBudgetMs(registration.value));
+          else if (analysisProvider === "angr") return registration;
+        }
+      }
+      return ok(budgets.length === 0 ? undefined : Math.max(...budgets));
     },
     providerInspections: async (fileCloseResources, inspectionSignal) => [
       await inspectSystemGhidraProvider(
@@ -61,6 +84,10 @@ export const createSystemDoctorHost = (
         fileCloseResources,
         inspectionSignal,
       ),
+      inspectAngrRegistration({
+        mcpConfigPath: environment.REA_ANGR_MCP_CONFIG,
+        pythonPath: environment.REA_ANGR_PYTHON,
+      }),
       await inspectKunaProvider(environment, process.platform, {
         fileCloseResources,
         signal: inspectionSignal,

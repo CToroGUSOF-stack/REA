@@ -217,6 +217,7 @@ or update either provider.
 Native formats and host support vary by provider. See
 [Hopper and Ghidra setup](docs/installation.md#hopper), the
 [IDA guide](docs/ida-provider.md) (including an optional native MCP bridge), the
+[angr guide](docs/angr-provider.md), the
 [Kuna decompiler guide](docs/kuna-provider.md), and
 [experimental Windows Ghidra support](docs/windows-ghidra-p0.md).
 Ghidra also supports [16-bit DOS analysis](docs/ghidra-dos.md).
@@ -272,11 +273,11 @@ Any agent that supports local MCP servers. Setup configures the
 </details>
 
 <details>
-<summary><strong>Do I need Hopper, Ghidra or IDA?</strong></summary>
+<summary><strong>Do I need Hopper, Ghidra, IDA or angr?</strong></summary>
 
 Deep native analysis uses one of them. Static JavaScript and .NET inspection
 work without a native analysis engine. Setup can install Hopper after approval;
-Ghidra and IDA use your existing installations. See [provider setup](docs/installation.md#hopper).
+Ghidra, IDA and angr use your existing installations. See [provider setup](docs/installation.md#hopper).
 
 </details>
 

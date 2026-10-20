@@ -3,13 +3,13 @@
 Run REA, connect your selected agents, and check the tools needed for your task.
 Setup previews configuration changes and asks for approval before applying them.
 
-| Task                              | Section                                                                                             |
-| --------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Connect an agent                  | [Start setup](#start-setup), then [review changes](#review-setup-changes)                           |
-| Diagnose one task                 | [Scoped readiness checks](#check-readiness-for-your-task)                                           |
-| Configure an analysis engine      | [Hopper](#hopper), [Ghidra](#ghidra), the [IDA guide](ida-provider.md), or [Kuna](kuna-provider.md) |
-| Update or remove REA              | [Maintenance](#diagnose-update-and-remove)                                                          |
-| Resolve a client-specific problem | [Client configuration](client-configuration.md)                                                     |
+| Task                              | Section                                                                                                                                 |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Connect an agent                  | [Start setup](#start-setup), then [review changes](#review-setup-changes)                                                               |
+| Diagnose one task                 | [Scoped readiness checks](#check-readiness-for-your-task)                                                                               |
+| Configure an analysis engine      | [Hopper](#hopper), [Ghidra](#ghidra), the [IDA guide](ida-provider.md), the [angr guide](angr-provider.md), or [Kuna](kuna-provider.md) |
+| Update or remove REA              | [Maintenance](#diagnose-update-and-remove)                                                                                              |
+| Resolve a client-specific problem | [Client configuration](client-configuration.md)                                                                                         |
 
 ## Start setup
 
@@ -331,7 +331,7 @@ Select the part you want to check:
 | Task                                | Readiness check                                                          |
 | ----------------------------------- | ------------------------------------------------------------------------ |
 | Static JavaScript/Electron analysis | Run `rea analyze-javascript-application PATH --json` directly.           |
-| One analysis engine                 | `rea doctor --provider ghidra --json` (or `hopper`, `ida`)               |
+| One analysis engine                 | `rea doctor --provider ghidra --json` (or `hopper`, `ida`, `angr`)       |
 | One agent registration              | `rea doctor --client codex --json` (see [client IDs](#supported-agents)) |
 | Installed workflow instructions     | `rea doctor --skill --json`                                              |
 
@@ -532,9 +532,9 @@ installation and preserves Hopper during uninstall.
 The automated Hopper installer supports macOS 12+, Ubuntu 24.04+, Fedora 41+,
 Nobara 44+, 64-bit Arch Linux, CachyOS, or Omarchy. REA itself runs on any
 Linux distribution with a recognized apt, dnf, or pacman package family, where
-an existing Hopper launcher is selected through `HOPPER_LAUNCHER_PATH`. Ghidra
-and IDA have their own provider-specific host requirements; Windows Ghidra uses
-the [experimental P0 boundary](windows-ghidra-p0.md).
+an existing Hopper launcher is selected through `HOPPER_LAUNCHER_PATH`. Ghidra,
+IDA, and angr have their own provider-specific host requirements; Windows Ghidra
+uses the [experimental P0 boundary](windows-ghidra-p0.md).
 
 On macOS, approved setup downloads the official DMG, checks its published size
 and digest, validates the application bundle, and atomically installs it to
