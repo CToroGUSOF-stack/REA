@@ -134,7 +134,8 @@ const resolveIdentifier = (
   // incoming value, or that a write in another activation precedes this read.
   const covered =
     read.hasDefiniteInitializer ||
-    semanticStableInitializer(binding, context.state) !== undefined;
+    (binding.definitions[0]?.kind === "function" &&
+      semanticStableInitializer(binding, context.state) !== undefined);
   const resolution =
     candidates.complete && !covered
       ? {

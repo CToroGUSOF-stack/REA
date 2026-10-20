@@ -81,14 +81,31 @@ const initializerPositionCache = (
   return created;
 };
 
+const isComputedMethodKey = (
+  parent: t.Node | undefined,
+  child: t.Node | undefined,
+): boolean =>
+  child !== undefined &&
+  (t.isObjectMethod(parent) || t.isClassMethod(parent)) &&
+  Boolean(parent.computed) &&
+  parent.key === child;
+
 const statementPosition = (
   statement: t.Statement,
   parents: WeakMap<t.Node, t.Node>,
   declarator?: t.VariableDeclarator,
 ): StatementPosition | null => {
-  const parent = parents.get(statement);
+  let effectiveStatement: t.Statement = statement;
+  let parent = parents.get(statement);
+  if (
+    t.isExportNamedDeclaration(parent) ||
+    t.isExportDefaultDeclaration(parent)
+  ) {
+    effectiveStatement = parent;
+    parent = parents.get(parent);
+  }
   if (!t.isProgram(parent) && !t.isBlockStatement(parent)) return null;
-  const index = parent.body.indexOf(statement);
+  const index = parent.body.indexOf(effectiveStatement);
   return index < 0
     ? null
     : {
@@ -122,7 +139,11 @@ export const semanticTopLevelEffectFollowsCapture = (
     let declarator: t.VariableDeclarator | undefined;
     let child: t.Node | undefined;
     while (node !== undefined) {
-      if (t.isFunction(node) || t.isLoop(node)) return null;
+      if (
+        (t.isFunction(node) && !isComputedMethodKey(node, child)) ||
+        t.isLoop(node)
+      )
+        return null;
       if (delayedInstanceFieldValue(node, child)) return null;
       if (t.isVariableDeclarator(node)) declarator = node;
       if (t.isStatement(node)) {
@@ -621,7 +642,7 @@ const bindingReadPosition = (
     }
     if (
       parent === undefined ||
-      t.isFunction(parent) ||
+      (t.isFunction(parent) && !isComputedMethodKey(parent, current)) ||
       delayedInstanceFieldValue(parent, current)
     ) {
       result = { position: null, repeating: false };

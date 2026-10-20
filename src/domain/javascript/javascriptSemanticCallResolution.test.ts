@@ -352,3 +352,81 @@ it("closes cycles at full-binding reads with bounded lookup growth", () => {
   expect(ten).toBeLessThan(3 * eight);
   expect(twelve).toBeLessThan(3 * ten);
 });
+
+it("preserves uncertainty when a callback is read before its var initializer executes", () => {
+  const context = indexed(
+    `function target() {} function read() { cb(); } read(); var cb = target;`,
+  );
+  const readFn = context.state.program.body[1];
+  if (!t.isFunctionDeclaration(readFn))
+    throw new Error("Missing read function");
+  const statement = readFn.body.body[0];
+  if (
+    !t.isExpressionStatement(statement) ||
+    !t.isCallExpression(statement.expression)
+  )
+    throw new Error("Missing call");
+  const target = context.state.callables.find(
+    (callable) => callable.name === "target",
+  );
+  if (target === undefined) throw new Error("Missing target");
+  const result = context.resolve(statement.expression.callee);
+  expect(result).toMatchObject({
+    complete: false,
+    callableIds: [target.callableId],
+    reason: expect.stringContaining("unordered assignment"),
+  });
+
+  const control = indexed(`function target() {} var cb = target; cb();`);
+  const controlStatement = control.state.program.body[2];
+  if (
+    !t.isExpressionStatement(controlStatement) ||
+    !t.isCallExpression(controlStatement.expression)
+  )
+    throw new Error("Missing control call");
+  const controlTarget = control.state.callables.find(
+    (callable) => callable.name === "target",
+  );
+  if (controlTarget === undefined) throw new Error("Missing control target");
+  expect(control.resolve(controlStatement.expression.callee)).toMatchObject({
+    complete: true,
+    callableIds: [controlTarget.callableId],
+  });
+});
+
+it("resolves calls to preceding exported variable initializers and computed method keys", () => {
+  const context = indexed(`
+    export const pick = () => "target";
+    const obj = { [pick()]() { return 1; } };
+    pick();
+  `);
+  const objStatement = context.state.program.body[1];
+  if (
+    !t.isVariableDeclaration(objStatement) ||
+    !t.isVariableDeclarator(objStatement.declarations[0]) ||
+    !t.isObjectExpression(objStatement.declarations[0].init)
+  )
+    throw new Error("Missing obj declaration");
+  const method = objStatement.declarations[0].init.properties[0];
+  if (!t.isObjectMethod(method) || !t.isCallExpression(method.key))
+    throw new Error("Missing computed key call");
+  const target = context.state.callables.find(
+    (callable) => callable.name === "pick",
+  );
+  if (target === undefined) throw new Error("Missing target");
+  expect(context.resolve(method.key.callee)).toMatchObject({
+    complete: true,
+    callableIds: [target.callableId],
+  });
+
+  const callStatement = context.state.program.body[2];
+  if (
+    !t.isExpressionStatement(callStatement) ||
+    !t.isCallExpression(callStatement.expression)
+  )
+    throw new Error("Missing pick call");
+  expect(context.resolve(callStatement.expression.callee)).toMatchObject({
+    complete: true,
+    callableIds: [target.callableId],
+  });
+});
