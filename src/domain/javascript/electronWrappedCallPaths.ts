@@ -536,15 +536,17 @@ export const collectElectronWrappedCallPaths = (
     if (guarded) accumulator.unknownFindings += 1;
     // Existing entries are raw syntax observations and remain valid even when
     // symbolic substitution can only describe this call under a predicate.
-    if (!guarded && existing)
-      (existing.value.api_status !== "object-literal" ||
-        existing.value.unknown_members > 0) &&
+    if (!guarded && existing) {
+      const replacesExisting =
+        existing.value.api_status !== "object-literal" ||
+        existing.value.unknown_members > 0;
+      if (replacesExisting)
         accumulator.contextBridgeApis.splice(
           accumulator.contextBridgeApis.indexOf(existing),
           1,
           { offset: node.start ?? -1, value: finding },
         );
-    else if (!guarded)
+    } else if (!guarded)
       accumulator.contextBridgeApis.push({
         offset: node.start ?? -1,
         value: finding,
