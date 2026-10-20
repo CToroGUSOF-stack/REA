@@ -256,6 +256,9 @@ export const classifyBinaryTargetFilesystemFailure = (
     ? undefined
     : new BinaryTargetError(path, targetFailureReason(code, cause.message), {
         cause,
+        // Windows reports a sharing violation as EBUSY: another process holds the file without
+        // read sharing, and the unchanged request succeeds once that process releases it.
+        ...(code === "EBUSY" ? { constraint: "target_in_use" } : {}),
       });
 };
 
@@ -278,6 +281,8 @@ const targetFailureReason = (code: string, detail: string): string => {
       return "target is not a regular file";
     case "ELOOP":
       return `target changed while being opened: ${detail}`;
+    case "EBUSY":
+      return `target is in use by another process (EBUSY): ${detail}`;
     default:
       return `target could not be read (${code}): ${detail}`;
   }

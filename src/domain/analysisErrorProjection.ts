@@ -110,6 +110,8 @@ export const projectAnalysisError = (
       RETRYABLE_CODES.has(code) ||
       (error instanceof AnalysisCapabilityUnavailableError &&
         error.retryable) ||
+      (error instanceof BinaryTargetError &&
+        error.constraint === "target_in_use") ||
       (code === "resource_constraint" &&
         error instanceof AnalysisResourceConstraintError &&
         (error.retryable ?? error.resource === "capacity")),
