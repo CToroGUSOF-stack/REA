@@ -13,7 +13,7 @@ export const FIRMWARE_TOOL_CONTRACTS = [
     ...toolContractMetadata("inspect_firmware_regions"),
     kind: "firmware-provider",
     description:
-      "Inspect signature candidates in a local firmware file with Binwalk 3.1.x (verified with 3.1.0). Returns offsets, reported lengths, descriptions and raw confidence values. Length validation and runtime addresses remain unknown. No extraction or target execution. Linux, caller-supplied tool and util-linux prlimit required; 128 MiB input limit, one worker and 120-second deadline.",
+      "Inspect signature candidates in a local firmware file with Binwalk 3.1.x (verified with 3.1.0). Returns offsets, reported lengths, descriptions and raw confidence values. Length validation and runtime addresses remain unknown. No extraction or target execution. Linux, caller-supplied tool, util-linux prlimit and a procps-compatible ps on REA's PATH required; 128 MiB input limit, one worker and 120-second deadline.",
     inputSchema: firmwareInputSchemas.inspect_firmware_regions,
     outputSchema: evidenceResultOf(
       firmwareResultSchemas.inspect_firmware_regions,
@@ -30,7 +30,7 @@ export const FIRMWARE_TOOL_CONTRACTS = [
     ...toolContractMetadata("extract_firmware"),
     kind: "firmware-provider",
     description:
-      "Extract caller-selected firmware bytes with Unblob 26.6.x (verified with 26.6.4) into an absent output directory. Returns verified child paths/digests, task derivations, unknown chunks, extraction diagnostics and explicit extraction_gaps rows naming unextracted regions, missing extractor dependencies and a continuation_id referencing shared extraction_continuations recovery instructions. Preserves the default sandbox; publishes regular files only. Linux, caller-supplied tool, format-specific extractors and util-linux prlimit required. No mounts or extracted-code execution. Select a returned native file with open_binary for Ghidra analysis; decompressed offsets are not original-file addresses.",
+      "Extract caller-selected firmware bytes with Unblob 26.6.x (verified with 26.6.4) into an absent output directory. Returns verified child paths/digests, task derivations, unknown chunks, extraction diagnostics and explicit extraction_gaps rows naming unextracted regions, missing extractor dependencies and a continuation_id referencing shared extraction_continuations recovery instructions. Preserves the default sandbox; publishes regular files only. Linux, caller-supplied tool, format-specific extractors, util-linux prlimit and a procps-compatible ps on REA's PATH required. No mounts or extracted-code execution. Select a returned native file with open_binary for Ghidra analysis; decompressed offsets are not original-file addresses.",
     inputSchema: firmwareInputSchemas.extract_firmware,
     outputSchema: evidenceResultOf(firmwareResultSchemas.extract_firmware),
     examples: [

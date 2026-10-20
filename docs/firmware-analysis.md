@@ -12,6 +12,8 @@ select a returned ELF separately for supported Ghidra analysis.
 On Linux, Binwalk and Unblob run as REA-owned processes and require a
 procps-compatible `ps` on REA's `PATH`; see the shared
 [Linux process prerequisite](installation.md#linux-owned-process-prerequisite).
+Minimal container images may omit `ps`; install the distribution’s `procps` or
+`procps-ng` package before running either firmware tool.
 
 ## Caller-supplied tools
 

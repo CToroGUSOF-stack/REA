@@ -521,7 +521,7 @@ const workflowAvailabilityFor = ({
       : {
           reason: "provider_missing",
           remediation:
-            "On Linux, provide an absolute REA_BINWALK_COMMAND (Binwalk 3.1.x, verified with 3.1.0) or REA_UNBLOB_COMMAND (Unblob 26.6.x, verified with 26.6.4) path and util-linux prlimit. Extraction also requires the selected format’s external extractor.",
+            "On Linux, provide an absolute REA_BINWALK_COMMAND (Binwalk 3.1.x, verified with 3.1.0) or REA_UNBLOB_COMMAND (Unblob 26.6.x, verified with 26.6.4) path, util-linux prlimit and a procps-compatible ps on REA's PATH. Extraction also requires the selected format’s external extractor.",
         };
   }
   if (kind === "android-provider")
