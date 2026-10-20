@@ -1,11 +1,16 @@
 import { createHash } from "node:crypto";
-import { mkdir, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect } from "vitest";
 
 import { toolContract } from "../../../src/contracts/toolContracts.js";
 import { peResourceFixture } from "../../../src/native/pe/PeResources.fixture.js";
+import { parseEvidence } from "../../../src/domain/evidence.js";
+import {
+  analysisViewJavaScriptEvidence,
+  analysisViewLayoutEvidence,
+} from "../../fixtures/analysisView.js";
 import { createGoBinaryFixture } from "../../fixtures/go/image.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { cliTest } from "../../support/cli/cliFixture.js";
@@ -14,6 +19,81 @@ import { cliTest } from "../../support/cli/cliFixture.js";
 describe.skipIf(process.platform === "win32")(
   "caller paths through a directory symlink and ..",
   () => {
+    cliTest(
+      "projects the Evidence file selected through a JSON path",
+      async ({ cli }) => {
+        const root = await createTestTempDirectory("rea-json-symlink-parent-");
+        await mkdir(join(root, "target/child"), { recursive: true });
+        await symlink("target/child", join(root, "link"));
+        const selected = analysisViewLayoutEvidence();
+        const sibling = analysisViewJavaScriptEvidence();
+        await writeFile(
+          join(root, "target/evidence.json"),
+          JSON.stringify(selected),
+        );
+        await writeFile(join(root, "evidence.json"), JSON.stringify(sibling));
+        for (const path of [
+          "link/../evidence.json",
+          `${root}/link/../evidence.json`,
+        ]) {
+          const filesystem = parseEvidence(
+            JSON.parse(
+              await readFile(
+                path.startsWith("/") ? path : `${root}/${path}`,
+                "utf8",
+              ),
+            ),
+          );
+          expect(filesystem.evidence_id).toBe(selected.evidence_id);
+          const result = await cli.run({
+            arguments: [
+              "inspect-analysis-view",
+              JSON.stringify({
+                source: { kind: "evidence-file", path },
+                view: { kind: "summary" },
+              }),
+              "--json",
+            ],
+            cwd: root,
+          });
+          expect(result.exitCode, result.stdout).toBe(0);
+          const evidence = parseEvidence(result.json);
+          expect(evidence.parameters.parent_evidence_id, path).toBe(
+            selected.evidence_id,
+          );
+          expect(evidence.evidence_links).toEqual([selected.evidence_id]);
+        }
+      },
+    );
+
+    cliTest.for([
+      "evidence.json/",
+      "evidence.json/.",
+      "missing/../evidence.json",
+    ])(
+      "refuses JSON Evidence path %j instead of reading a sibling file",
+      async (path, { cli }) => {
+        const root = await createTestTempDirectory("rea-json-path-refusal-");
+        await writeFile(
+          join(root, "evidence.json"),
+          JSON.stringify(analysisViewLayoutEvidence()),
+        );
+        const result = await cli.run({
+          arguments: [
+            "inspect-analysis-view",
+            JSON.stringify({
+              source: { kind: "evidence-file", path },
+              view: { kind: "summary" },
+            }),
+            "--json",
+          ],
+          cwd: root,
+        });
+        expect(result.exitCode, result.stdout).toBe(1);
+        expect(result.json).toMatchObject({ code: "invalid_request" });
+      },
+    );
+
     cliTest(
       "inspects the file the filesystem selects, not its lexical sibling",
       async ({ cli }) => {
