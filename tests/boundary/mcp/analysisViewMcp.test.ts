@@ -255,6 +255,83 @@ it("projects opted-in query names identically from retained and portable MCP Evi
   expect(outputs[0]).toEqual(outputs[1]);
 });
 
+it("advertises HAR MIME preview selection and keeps large bodies retained across MCP projections", async () => {
+  const { client, session } = await connect();
+  const capture = analysisViewCaptureFixture();
+  capture.records = [capture.records[3]!, capture.records[1]!];
+  capture.records.forEach((record) => {
+    record.reported = {
+      request: {
+        method: "GET",
+        url: "https://api.test/items",
+        headers: [{ name: "X-private", value: "header-not-previewed" }],
+      },
+      response: {
+        status: 200,
+        content: {
+          mimeType: "application/json; charset=utf-8",
+          text: "body-not-previewed".repeat(100000),
+        },
+      },
+    };
+  });
+  const parent = analysisViewCaptureEvidence(capture);
+  const retained = session.recordEvidence(parent);
+  if (!retained.ok) throw retained.error;
+  const schemas = await advertisedMcpToolSchemas(
+    client,
+    "inspect_analysis_view",
+  );
+  const input = {
+    source: { kind: "retained-evidence", evidence_id: parent.evidence_id },
+    view: {
+      kind: "capture",
+      detail: "preview",
+      include_response_content_type: true,
+      limit: 2,
+    },
+  };
+  expect(schemas.ajv.validate(schemas.inputSchema, input)).toBe(true);
+  const outputs = [];
+  for (const source of [input.source, { kind: "inline", evidence: parent }]) {
+    const response = await client.callTool({
+      name: "inspect_analysis_view",
+      arguments: { ...input, source },
+    });
+    expect(response.isError).not.toBe(true);
+    expect(
+      schemas.ajv.validate(schemas.outputSchema, response.structuredContent),
+    ).toBe(true);
+    const result = parseEvidence(response.structuredContent).normalized_result;
+    expect(result).toMatchObject({
+      parent_evidence_id: parent.evidence_id,
+      items: [
+        {
+          ordinal: 3,
+          reported: {
+            response: {
+              content: { mimeType: "application/json; charset=utf-8" },
+            },
+          },
+        },
+        {
+          ordinal: 1,
+          reported: {
+            response: {
+              content: { mimeType: "application/json; charset=utf-8" },
+            },
+          },
+        },
+      ],
+    });
+    for (const value of ["body-not-previewed", "header-not-previewed"])
+      expect(JSON.stringify(response)).not.toContain(value);
+    outputs.push(result);
+  }
+  expect(outputs[0]).toEqual(outputs[1]);
+  expect(session.evidenceById(parent.evidence_id)).toEqual(parent);
+});
+
 it("discovers an oversized native dossier by exact metadata and reads its retained view", async () => {
   const { client, session } = await connect();
   const advertised = (await client.listTools()).tools.find(
