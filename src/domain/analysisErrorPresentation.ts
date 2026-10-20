@@ -136,8 +136,18 @@ export const analysisErrorRemediationAction = (
     error.remediationAction !== undefined
   )
     return error.remediationAction;
-  if (error instanceof UnknownRegistryError && error.reason === "not-found")
-    return "Check that the unknown_id belongs to this session, then retry.";
+  if (error instanceof UnknownRegistryError) {
+    if (error.reason === "not-found")
+      return "Check that the unknown_id belongs to this session, then retry.";
+    if (error.reason === "already-exists")
+      return "Use list_unknowns to find the existing residual unknown; if you intend to change it, submit a complete update_unknown using its current revision.";
+    if (error.reason === "revision-conflict")
+      return "Call list_unknowns to read the current revision, then retry update_unknown with that revision.";
+    if (error.reason === "invalid-transition")
+      return "Review the current residual-unknown status and resolution requirements, then submit a valid full-state update.";
+    if (error.reason === "integrity")
+      return "Review details.reason and correct the invalid Evidence or relationship references before updating the residual unknown.";
+  }
   return analysisErrorUserMessage(error);
 };
 
@@ -269,10 +279,19 @@ export const analysisErrorUserMessage = (error: AnalysisError): string => {
   if (error instanceof EvidenceIntegrityError)
     return "Evidence is invalid or has changed. Recreate or re-import it, then try again.";
   if (error instanceof EvidenceFileError) return evidenceFileMessage(error);
-  if (error instanceof UnknownRegistryError && error.reason === "not-found")
-    return "The requested residual unknown does not exist in this session. Check the unknown_id and try again.";
-  if (error instanceof UnknownRegistryError)
-    return "Evidence state changed before the update completed. Refresh the current state and try again.";
+  if (error instanceof UnknownRegistryError) {
+    if (error.reason === "not-found")
+      return "The requested residual unknown does not exist in this session. Check the unknown_id and try again.";
+    if (error.reason === "already-exists")
+      return "A residual unknown with this identity already exists in this session. Use list_unknowns to find it; update the existing head only if you intend to change it.";
+    if (error.reason === "revision-conflict")
+      return "The residual unknown changed before the update completed. Refresh the current state and retry update_unknown with its current revision.";
+    if (error.reason === "invalid-transition")
+      return "The requested residual-unknown state transition is invalid. Review the current status and resolution requirements.";
+    if (error.reason === "integrity")
+      return "The residual-unknown mutation failed an integrity check. Review details.reason and correct the Evidence or relationship references.";
+    return "The residual-unknown registry limit was reached. Review the session's available registry capacity before recording additional unknowns.";
+  }
   if (error instanceof ConfigurationError)
     return error.settings.length === 0
       ? "REA configuration is invalid. Run `rea doctor` and fix the reported setting."

@@ -194,8 +194,7 @@ const evidenceFileCode = (
 const unknownRegistryCode = (
   reason: UnknownRegistryError["reason"],
 ): AnalysisErrorProjection["code"] => {
-  if (reason === "revision-conflict" || reason === "already-exists")
-    return "revision_conflict";
+  if (reason === "revision-conflict") return "revision_conflict";
   if (reason === "limit") return "truncated";
   if (reason === "integrity") return "evidence_integrity_mismatch";
   return "execution_failure";

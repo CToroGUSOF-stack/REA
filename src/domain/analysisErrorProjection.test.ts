@@ -602,6 +602,55 @@ describe("analysis error projection: retry guidance", () => {
         expect(text).not.toMatch(/\bretry\b/iu);
     },
   );
+
+  it.each([
+    {
+      reason: "already-exists",
+      code: "execution_failure",
+      retryable: false,
+      message: "identity already exists",
+      remediation: "list_unknowns",
+    },
+    {
+      reason: "revision-conflict",
+      code: "revision_conflict",
+      retryable: true,
+      message: "changed before the update completed",
+      remediation: "current revision",
+    },
+    {
+      reason: "invalid-transition",
+      code: "execution_failure",
+      retryable: false,
+      message: "state transition is invalid",
+      remediation: "resolution requirements",
+    },
+    {
+      reason: "integrity",
+      code: "evidence_integrity_mismatch",
+      retryable: false,
+      message: "failed an integrity check",
+      remediation: "relationship references",
+    },
+  ] as const)(
+    "projects residual-unknown $reason with truthful recovery guidance",
+    ({ reason, code, retryable, message, remediation }) => {
+      const projected = projectAnalysisError(new UnknownRegistryError(reason));
+      expect(projected).toMatchObject({
+        code,
+        retryable,
+        message: expect.stringContaining(message),
+        remediation: { action: expect.stringContaining(remediation) },
+        details: { reason },
+      });
+      if (reason === "already-exists")
+        for (const text of [projected.message, projected.remediation.action])
+          expect(text).not.toMatch(/\b(?:refresh|retry)\b/iu);
+      expect(analysisErrorProjectionSchema.safeParse(projected).success).toBe(
+        true,
+      );
+    },
+  );
 });
 
 describe("analysis error projection: caller contract", () => {

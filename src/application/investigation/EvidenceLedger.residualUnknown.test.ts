@@ -238,12 +238,15 @@ describe("residual unknown dependency histories", () => {
     expect(store.listUnknowns({ severity: "high" })).toHaveLength(1);
     expect(store.listUnknowns({ status: "resolved" })).toEqual([]);
     const duplicate = store.recordUnknown(
-      input("Is branch live?"),
+      input("Is branch live?", { severity: "medium" }),
       mutation("two"),
     );
     expect(duplicate.ok).toBe(false);
     if (!duplicate.ok)
-      expect(duplicate.error._tag).toBe("UnknownRegistryError");
+      expect(duplicate.error).toMatchObject({
+        _tag: "UnknownRegistryError",
+        reason: "already-exists",
+      });
     const mutationId = `ev_${"a".repeat(64)}`;
     const normalized = createResidualUnknown(
       input("A   scoped question"),
